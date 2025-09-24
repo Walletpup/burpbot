@@ -623,7 +623,7 @@ async def on_member_join(member):
         logger.error(f"Error sending welcome message: {e}")
 
 @bot.tree.command(name='purge', description='Delete messages in bulk (Admin only)')
-async def purge_command(interaction: discord.Interaction, amount: int = 10):
+async def purge_command(interaction: discord.Interaction, amount: int):
     """Admin command to delete messages in bulk"""
     try:
         # Check if user is admin
