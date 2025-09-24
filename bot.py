@@ -288,6 +288,16 @@ class BurpBot:
                     "SELECT total_amount FROM gas_streak_prize_pool ORDER BY id DESC LIMIT 1"
                 )
                 
+                # Get total pool contributions (total payments made to pool)
+                total_contributions = await conn.fetchval(
+                    "SELECT COUNT(*) FROM gas_streaks"
+                )
+                
+                # Get total BURP sent to pool (sum of all BURP contributions)
+                total_burp_contributions = await conn.fetchval(
+                    "SELECT COALESCE(SUM(burp_amount), 0) FROM gas_streaks"
+                )
+                
                 # Get recent winner info
                 recent_winner = await conn.fetchrow(
                     """SELECT wallet_address, prize_amount, created_at, transaction_hash
@@ -357,7 +367,9 @@ class BurpBot:
                     },
                     "prize_pools": {
                         "pools": [float(prize_pool['total_amount'])] if prize_pool else [],
-                        "total_active": f"{int(float(prize_pool['total_amount'])) if prize_pool else 0:,}"
+                        "total_active": f"{int(float(prize_pool['total_amount'])) if prize_pool else 0:,}",
+                        "total_contributions": f"{total_contributions or 0:,}",
+                        "total_burp_contributions": f"{int(float(total_burp_contributions or 0)):,}"
                     },
                     "recent_activity": {
                         "last_winner": last_winner_time,
@@ -697,11 +709,15 @@ async def stats_command(ctx):
             inline=True
         )
         
-        # Prize Pool Stats
+        # Pool Stats
         pool_stats = stats_data.get("prize_pools", {})
         embed.add_field(
-            name="Current Prize Pool",
-            value=f"```{pool_stats.get('total_active', 'N/A')} BURP```",
+            name="Pool Stats",
+            value="```" +
+                  f"Current Pool: {pool_stats.get('total_active', 'N/A')} BURP\n" +
+                  f"Total Contributions: {pool_stats.get('total_contributions', 'N/A')}\n" +
+                  f"Total BURP Contributions: {pool_stats.get('total_burp_contributions', 'N/A')} BURP" +
+                  "```",
             inline=True
         )
         
