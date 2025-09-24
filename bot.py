@@ -307,6 +307,8 @@ class BurpBot:
                 
                 # Calculate time differences
                 last_winner_time = "N/A"
+                last_game_time = "N/A"
+                
                 # Calculate time since last winner
                 if recent_winner:
                     time_diff = datetime.utcnow() - recent_winner['created_at']
@@ -325,6 +327,25 @@ class BurpBot:
                             last_winner_time = f"{hours}h {remaining_minutes}m ago"
                 else:
                     last_winner_time = "N/A"
+                
+                # Calculate time since last game (streak)
+                if recent_streak:
+                    time_diff = datetime.utcnow() - recent_streak['created_at']
+                    total_minutes = int(time_diff.total_seconds() // 60)
+                    
+                    if total_minutes < 1:
+                        last_game_time = "Just now"
+                    elif total_minutes < 60:
+                        last_game_time = f"{total_minutes} minute{'s' if total_minutes != 1 else ''} ago"
+                    else:
+                        hours = total_minutes // 60
+                        remaining_minutes = total_minutes % 60
+                        if remaining_minutes == 0:
+                            last_game_time = f"{hours} hour{'s' if hours != 1 else ''} ago"
+                        else:
+                            last_game_time = f"{hours}h {remaining_minutes}m ago"
+                else:
+                    last_game_time = "N/A"
                 
                 # Format the response
                 return {
@@ -613,20 +634,30 @@ async def on_member_join(member):
 async def purge_command(ctx, amount: int = 10):
     """Admin command to delete messages in bulk"""
     try:
-        # Respond immediately to prevent timeout
-        await ctx.defer(ephemeral=True)
+        # Check if this is a slash command (interaction) or regular command
+        is_interaction = hasattr(ctx, 'interaction') and ctx.interaction is not None
+        
+        if is_interaction:
+            # For slash commands, defer the response
+            await ctx.defer(ephemeral=True)
         
         # Validate amount
         if amount < 1:
-            await ctx.followup.send("❌ Amount must be at least 1", ephemeral=True)
+            if is_interaction:
+                await ctx.followup.send("❌ Amount must be at least 1", ephemeral=True)
+            else:
+                await ctx.send("❌ Amount must be at least 1", delete_after=5)
             return
         
         if amount > 100:
-            await ctx.followup.send("❌ Cannot delete more than 100 messages at once", ephemeral=True)
+            if is_interaction:
+                await ctx.followup.send("❌ Cannot delete more than 100 messages at once", ephemeral=True)
+            else:
+                await ctx.send("❌ Cannot delete more than 100 messages at once", delete_after=5)
             return
         
-        # Delete the command message first (if it's a regular command, not slash)
-        if ctx.message:
+        # Delete the command message first (for regular commands)
+        if not is_interaction and ctx.message:
             try:
                 await ctx.message.delete()
             except:
@@ -635,27 +666,51 @@ async def purge_command(ctx, amount: int = 10):
         # Purge messages
         deleted = await ctx.channel.purge(limit=amount)
         
-        # Send confirmation via followup
-        await ctx.followup.send(f"✅ Deleted {len(deleted)} messages", ephemeral=True)
+        # Send confirmation
+        if is_interaction:
+            await ctx.followup.send(f"✅ Deleted {len(deleted)} messages", ephemeral=True)
+        else:
+            confirmation = await ctx.send(f"✅ Deleted {len(deleted)} messages")
+            # Auto-delete confirmation after 3 seconds
+            await asyncio.sleep(3)
+            try:
+                await confirmation.delete()
+            except:
+                pass
         
         logger.info(f"Admin {ctx.author.name} purged {len(deleted)} messages in #{ctx.channel.name}")
         
     except discord.Forbidden:
-        try:
-            await ctx.followup.send("❌ I don't have permission to delete messages in this channel", ephemeral=True)
-        except:
-            pass
+        error_msg = "❌ I don't have permission to delete messages in this channel"
+        if is_interaction:
+            try:
+                await ctx.followup.send(error_msg, ephemeral=True)
+            except:
+                pass
+        else:
+            await ctx.send(error_msg, delete_after=5)
     except discord.HTTPException as e:
-        try:
-            await ctx.followup.send(f"❌ Error deleting messages: {str(e)}", ephemeral=True)
-        except:
-            pass
+        error_msg = f"❌ Error deleting messages: {str(e)}"
+        if is_interaction:
+            try:
+                await ctx.followup.send(error_msg, ephemeral=True)
+            except:
+                pass
+        else:
+            await ctx.send(error_msg, delete_after=5)
     except Exception as e:
         logger.error(f"Error in purge command: {e}")
-        try:
-            await ctx.followup.send("❌ An error occurred while purging messages", ephemeral=True)
-        except:
-            pass
+        error_msg = "❌ An error occurred while purging messages"
+        if is_interaction:
+            try:
+                await ctx.followup.send(error_msg, ephemeral=True)
+            except:
+                pass
+        else:
+            try:
+                await ctx.send(error_msg, delete_after=5)
+            except:
+                pass
 
 @bot.hybrid_command(name='stats')
 async def stats_command(ctx):
