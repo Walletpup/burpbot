@@ -629,88 +629,48 @@ async def on_member_join(member):
     except Exception as e:
         logger.error(f"Error sending welcome message: {e}")
 
-@bot.hybrid_command(name='purge')
+@bot.command(name='purge')
 @is_admin_user()
 async def purge_command(ctx, amount: int = 10):
     """Admin command to delete messages in bulk"""
     try:
-        # Check if this is a slash command (interaction) or regular command
-        is_interaction = hasattr(ctx, 'interaction') and ctx.interaction is not None
-        
-        if is_interaction:
-            # For slash commands, defer the response
-            await ctx.defer(ephemeral=True)
-        
         # Validate amount
         if amount < 1:
-            if is_interaction:
-                await ctx.followup.send("❌ Amount must be at least 1", ephemeral=True)
-            else:
-                await ctx.send("❌ Amount must be at least 1", delete_after=5)
+            await ctx.send("❌ Amount must be at least 1", delete_after=5)
             return
         
         if amount > 100:
-            if is_interaction:
-                await ctx.followup.send("❌ Cannot delete more than 100 messages at once", ephemeral=True)
-            else:
-                await ctx.send("❌ Cannot delete more than 100 messages at once", delete_after=5)
+            await ctx.send("❌ Cannot delete more than 100 messages at once", delete_after=5)
             return
         
-        # Delete the command message first (for regular commands)
-        if not is_interaction and ctx.message:
-            try:
-                await ctx.message.delete()
-            except:
-                pass
+        # Delete the command message first
+        try:
+            await ctx.message.delete()
+        except:
+            pass
         
         # Purge messages
         deleted = await ctx.channel.purge(limit=amount)
         
-        # Send confirmation
-        if is_interaction:
-            await ctx.followup.send(f"✅ Deleted {len(deleted)} messages", ephemeral=True)
-        else:
-            confirmation = await ctx.send(f"✅ Deleted {len(deleted)} messages")
-            # Auto-delete confirmation after 3 seconds
-            await asyncio.sleep(3)
-            try:
-                await confirmation.delete()
-            except:
-                pass
+        # Send confirmation message
+        confirmation = await ctx.send(f"🧹 Cleaned {len(deleted)} messages")
+        
+        # Auto-delete confirmation after 3 seconds
+        await asyncio.sleep(3)
+        try:
+            await confirmation.delete()
+        except:
+            pass
         
         logger.info(f"Admin {ctx.author.name} purged {len(deleted)} messages in #{ctx.channel.name}")
         
     except discord.Forbidden:
-        error_msg = "❌ I don't have permission to delete messages in this channel"
-        if is_interaction:
-            try:
-                await ctx.followup.send(error_msg, ephemeral=True)
-            except:
-                pass
-        else:
-            await ctx.send(error_msg, delete_after=5)
+        await ctx.send("❌ I don't have permission to delete messages in this channel", delete_after=5)
     except discord.HTTPException as e:
-        error_msg = f"❌ Error deleting messages: {str(e)}"
-        if is_interaction:
-            try:
-                await ctx.followup.send(error_msg, ephemeral=True)
-            except:
-                pass
-        else:
-            await ctx.send(error_msg, delete_after=5)
+        await ctx.send(f"❌ Error deleting messages: {str(e)}", delete_after=5)
     except Exception as e:
         logger.error(f"Error in purge command: {e}")
-        error_msg = "❌ An error occurred while purging messages"
-        if is_interaction:
-            try:
-                await ctx.followup.send(error_msg, ephemeral=True)
-            except:
-                pass
-        else:
-            try:
-                await ctx.send(error_msg, delete_after=5)
-            except:
-                pass
+        await ctx.send("❌ An error occurred while purging messages", delete_after=5)
 
 @bot.hybrid_command(name='stats')
 async def stats_command(ctx):
