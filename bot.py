@@ -614,20 +614,8 @@ async def on_member_join(member):
         
         embed = discord.Embed(
             title="Welcome!",
-            description=f"Hey {member.mention}! Welcome to the **Burp** community!",
+            description=f"Hey mmhmmphff {member.mention}! Welcome to the **Burp** community!",
             color=0x00ff00
-        )
-        
-        embed.add_field(
-            name="Get Started",
-            value="• Check out our Gas Streaks game\n• Verify yourself to get the @Burper role\n• Join the fun and win BURP!",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="Useful Links",
-            value="• Website: https://www.burpcoin.site/\n• Gas Streaks: https://www.burpcoin.site/gas-streaks\n• Twitter: https://x.com/burpcoinada",
-            inline=False
         )
         
         # Set the user's avatar as the main image
