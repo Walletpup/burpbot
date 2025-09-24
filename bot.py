@@ -110,7 +110,7 @@ class BurpBot:
         # Start the monitoring tasks
         self.monitoring_task = asyncio.create_task(self.monitor_winners())
         self.pool_monitoring_task = asyncio.create_task(self.monitor_new_games())
-        logger.info("Started database monitoring for new winners and games")
+        logger.info("Started database monitoring for new winners and prize pool changes")
     
     async def init_last_winner_id(self):
         """Initialize the last checked winner ID to avoid duplicate notifications"""
@@ -118,8 +118,8 @@ class BurpBot:
             async with self.db_pool.acquire() as conn:
                 # Get the most recent winner ID to start monitoring from
                 result = await conn.fetchrow(
-                    """SELECT id FROM games 
-                       WHERE status = 'completed' AND winner_address IS NOT NULL 
+                    """SELECT id FROM gas_streaks 
+                       WHERE won = true 
                        ORDER BY created_at DESC 
                        LIMIT 1"""
                 )
@@ -141,10 +141,9 @@ class BurpBot:
                     # Check for new winners since last check
                     if self.last_checked_winner_id:
                         query = """
-                            SELECT id, winner_address, prize_amount, created_at, game_id
-                            FROM games 
-                            WHERE status = 'completed' 
-                            AND winner_address IS NOT NULL 
+                            SELECT id, wallet_address, prize_amount, created_at, transaction_hash, streak_number
+                            FROM gas_streaks 
+                            WHERE won = true 
                             AND id > $1
                             ORDER BY created_at ASC
                         """
@@ -152,10 +151,9 @@ class BurpBot:
                     else:
                         # First time check - get the most recent winner
                         query = """
-                            SELECT id, winner_address, prize_amount, created_at, game_id
-                            FROM games 
-                            WHERE status = 'completed' 
-                            AND winner_address IS NOT NULL 
+                            SELECT id, wallet_address, prize_amount, created_at, transaction_hash, streak_number
+                            FROM gas_streaks 
+                            WHERE won = true 
                             ORDER BY created_at DESC 
                             LIMIT 1
                         """
@@ -178,13 +176,13 @@ class BurpBot:
         try:
             # Convert database row to winner data format
             winner_data = {
-                'winner_address': winner_row['winner_address'],
+                'winner_address': winner_row['wallet_address'],
                 'prize_amount': str(winner_row['prize_amount']),
-                'game_id': winner_row['game_id'],
-                'streak_length': 'N/A'  # You may need to adjust this based on your schema
+                'game_id': winner_row['transaction_hash'][:16],  # Use first part of tx hash as game ID
+                'streak_length': str(winner_row['streak_number'])
             }
             
-            logger.info(f"New winner detected: {winner_data['winner_address']} won {winner_data['prize_amount']} ADA")
+            logger.info(f"New winner detected: {winner_data['winner_address']} won {winner_data['prize_amount']} ADA on streak {winner_data['streak_length']}")
             
             # Send winner announcement
             await self.send_winner_announcement(winner_data)
@@ -193,7 +191,9 @@ class BurpBot:
             logger.error(f"Error processing new winner: {e}")
     
     async def monitor_new_games(self):
-        """Background task to monitor for new games/prize pools"""
+        """Background task to monitor for prize pool changes"""
+        last_prize_amount = None
+        
         while True:
             try:
                 if not self.db_pool:
@@ -201,55 +201,33 @@ class BurpBot:
                     continue
                 
                 async with self.db_pool.acquire() as conn:
-                    # Check for new games since last check
-                    if self.last_checked_game_id:
-                        query = """
-                            SELECT id, prize_pool, created_at, game_id
-                            FROM games 
-                            WHERE status = 'active' 
-                            AND id > $1
-                            ORDER BY created_at ASC
-                        """
-                        new_games = await conn.fetch(query, self.last_checked_game_id)
-                    else:
-                        # Initialize - get the most recent game ID
-                        result = await conn.fetchrow(
-                            """SELECT id FROM games 
-                               ORDER BY created_at DESC 
-                               LIMIT 1"""
-                        )
-                        if result:
-                            self.last_checked_game_id = result['id']
-                        new_games = []
+                    # Check current prize pool amount
+                    current_pool = await conn.fetchrow(
+                        "SELECT total_amount FROM gas_streak_prize_pool ORDER BY id DESC LIMIT 1"
+                    )
                     
-                    # Process new games
-                    for game in new_games:
-                        await self.process_new_game(game)
-                        self.last_checked_game_id = game['id']
+                    if current_pool and last_prize_amount is not None:
+                        current_amount = float(current_pool['total_amount'])
+                        
+                        # If prize pool increased significantly (new contributions)
+                        if current_amount > last_prize_amount + 50:  # 50+ ADA increase
+                            pool_data = {
+                                'total_prize': str(current_amount),
+                                'game_id': f"pool-{int(datetime.utcnow().timestamp())}"
+                            }
+                            
+                            logger.info(f"Prize pool increased to {current_amount} ADA")
+                            await self.send_new_prize_pool_announcement(pool_data)
+                    
+                    if current_pool:
+                        last_prize_amount = float(current_pool['total_amount'])
                 
-                # Check every 45 seconds for new games
-                await asyncio.sleep(45)
+                # Check every 2 minutes for prize pool changes
+                await asyncio.sleep(120)
                 
             except Exception as e:
-                logger.error(f"Error in game monitoring: {e}")
+                logger.error(f"Error in prize pool monitoring: {e}")
                 await asyncio.sleep(60)  # Wait longer on error
-    
-    async def process_new_game(self, game_row):
-        """Process a new game and send prize pool notification"""
-        try:
-            # Convert database row to pool data format
-            pool_data = {
-                'total_prize': str(game_row['prize_pool']),
-                'game_id': game_row['game_id']
-            }
-            
-            logger.info(f"New game detected: {pool_data['game_id']} with {pool_data['total_prize']} ADA prize pool")
-            
-            # Send prize pool announcement
-            await self.send_new_prize_pool_announcement(pool_data)
-            
-        except Exception as e:
-            logger.error(f"Error processing new game: {e}")
     
     async def fetch_gas_streaks_stats(self):
         """Fetch real-time stats from burpcoin database"""
@@ -259,47 +237,46 @@ class BurpBot:
                 return None
             
             async with self.db_pool.acquire() as conn:
-                # Query your burpcoin database for gas streaks stats
-                # Adjust these queries based on your actual database schema
+                # Query your burpcoin database for gas streaks stats using correct schema
                 
-                # Get active games count
-                active_games = await conn.fetchval(
-                    "SELECT COUNT(*) FROM games WHERE status = 'active'"
-                )
-                
-                # Get total players
+                # Get total players (unique wallet addresses)
                 total_players = await conn.fetchval(
-                    "SELECT COUNT(DISTINCT player_address) FROM game_entries"
+                    "SELECT COUNT(*) FROM gas_streak_users"
                 )
                 
-                # Get completed games
-                games_completed = await conn.fetchval(
-                    "SELECT COUNT(*) FROM games WHERE status = 'completed'"
+                # Get total streaks sent
+                total_streaks = await conn.fetchval(
+                    "SELECT COUNT(*) FROM gas_streaks"
+                )
+                
+                # Get total winners (streaks that won)
+                total_winners = await conn.fetchval(
+                    "SELECT COUNT(*) FROM gas_streaks WHERE won = true"
                 )
                 
                 # Get total ADA won
                 total_ada_won = await conn.fetchval(
-                    "SELECT COALESCE(SUM(prize_amount), 0) FROM games WHERE status = 'completed'"
+                    "SELECT COALESCE(SUM(prize_amount), 0) FROM gas_streaks WHERE won = true"
                 )
                 
-                # Get active prize pools
-                active_pools = await conn.fetch(
-                    "SELECT prize_pool FROM games WHERE status = 'active'"
+                # Get current prize pool
+                prize_pool = await conn.fetchrow(
+                    "SELECT total_amount FROM gas_streak_prize_pool ORDER BY id DESC LIMIT 1"
                 )
                 
                 # Get recent winner info
                 recent_winner = await conn.fetchrow(
-                    """SELECT winner_address, created_at, game_id 
-                       FROM games 
-                       WHERE status = 'completed' AND winner_address IS NOT NULL
+                    """SELECT wallet_address, prize_amount, created_at, transaction_hash
+                       FROM gas_streaks 
+                       WHERE won = true
                        ORDER BY created_at DESC 
                        LIMIT 1"""
                 )
                 
-                # Get recent game info
-                recent_game = await conn.fetchrow(
-                    """SELECT created_at, game_id 
-                       FROM games 
+                # Get recent streak info
+                recent_streak = await conn.fetchrow(
+                    """SELECT created_at, transaction_hash, wallet_address
+                       FROM gas_streaks 
                        ORDER BY created_at DESC 
                        LIMIT 1"""
                 )
@@ -313,27 +290,27 @@ class BurpBot:
                     hours = int(time_diff.total_seconds() // 3600)
                     last_winner_time = f"{hours} hours ago" if hours > 0 else "Less than 1 hour ago"
                 
-                if recent_game:
-                    time_diff = datetime.utcnow() - recent_game['created_at']
+                if recent_streak:
+                    time_diff = datetime.utcnow() - recent_streak['created_at']
                     minutes = int(time_diff.total_seconds() // 60)
                     last_game_time = f"{minutes} minutes ago" if minutes > 0 else "Just now"
                 
                 # Format the response
                 return {
                     "gas_streaks": {
-                        "active_games": active_games or 0,
+                        "active_games": 1 if prize_pool and prize_pool['total_amount'] > 0 else 0,
                         "total_players": total_players or 0,
-                        "games_completed": games_completed or 0,
-                        "total_ada_won": f"{total_ada_won or 0:,.0f}"
+                        "games_completed": total_streaks or 0,
+                        "total_ada_won": f"{total_ada_won or 0:,.2f}"
                     },
                     "prize_pools": {
-                        "pools": [float(pool['prize_pool']) for pool in active_pools] if active_pools else [],
-                        "total_active": f"{sum(float(pool['prize_pool']) for pool in active_pools) if active_pools else 0:,.0f}"
+                        "pools": [float(prize_pool['total_amount'])] if prize_pool else [],
+                        "total_active": f"{float(prize_pool['total_amount']) if prize_pool else 0:,.2f}"
                     },
                     "recent_activity": {
                         "last_winner": last_winner_time,
                         "last_game": last_game_time,
-                        "last_winner_address": recent_winner['winner_address'][:12] + "..." if recent_winner else "N/A"
+                        "last_winner_address": recent_winner['wallet_address'][:12] + "..." if recent_winner else "N/A"
                     }
                 }
                 
@@ -876,8 +853,18 @@ async def send_links_embed():
                 inline=True
             )
         
+        # Get the specified user's avatar for thumbnail
+        try:
+            target_user = bot.get_user(1419117925465460878)
+            if target_user:
+                thumbnail_url = target_user.display_avatar.url
+            else:
+                thumbnail_url = "https://www.burpcoin.site/favicon.ico"
+        except:
+            thumbnail_url = "https://www.burpcoin.site/favicon.ico"
+        
         embed.set_footer(text="Stay connected with Burp!", icon_url="https://www.burpcoin.site/favicon.ico")
-        embed.set_thumbnail(url="https://www.burpcoin.site/favicon.ico")
+        embed.set_thumbnail(url=thumbnail_url)
         
         await channel.send(embed=embed)
         logger.info("Sent links embed to links channel")
@@ -1008,6 +995,69 @@ async def test_invite_command(ctx):
     
     await ctx.send(embed=embed)
 
+@bot.command(name='dbschema', hidden=True)
+@is_admin_user()
+async def db_schema_command(ctx):
+    """Admin command to check database schema"""
+    try:
+        if not burp_bot.db_pool:
+            await ctx.send("❌ Database not connected")
+            return
+        
+        loading_msg = await ctx.send("🔍 Checking database schema...")
+        
+        async with burp_bot.db_pool.acquire() as conn:
+            # Get all tables
+            tables = await conn.fetch(
+                """SELECT table_name 
+                   FROM information_schema.tables 
+                   WHERE table_schema = 'public' 
+                   ORDER BY table_name"""
+            )
+            
+            if not tables:
+                await loading_msg.edit(content="ℹ️ No tables found in database")
+                return
+            
+            embed = discord.Embed(
+                title="Database Schema",
+                description="Available tables in your database:",
+                color=0x0099ff
+            )
+            
+            table_list = []
+            for table in tables:
+                table_name = table['table_name']
+                table_list.append(f"• {table_name}")
+                
+                # Get column info for each table
+                columns = await conn.fetch(
+                    """SELECT column_name, data_type 
+                       FROM information_schema.columns 
+                       WHERE table_name = $1 
+                       ORDER BY ordinal_position""",
+                    table_name
+                )
+                
+                column_info = []
+                for col in columns[:5]:  # Show first 5 columns
+                    column_info.append(f"{col['column_name']} ({col['data_type']})")
+                
+                if len(columns) > 5:
+                    column_info.append(f"... and {len(columns) - 5} more")
+                
+                embed.add_field(
+                    name=f"Table: {table_name}",
+                    value="```" + "\n".join(column_info) + "```",
+                    inline=False
+                )
+            
+            await loading_msg.edit(content=None, embed=embed)
+            
+    except Exception as e:
+        await ctx.send(f"❌ Error checking schema: {e}")
+        logger.error(f"Error in db_schema_command: {e}")
+
 @bot.command(name='checkwinners', hidden=True)
 @is_admin_user()
 async def check_winners_command(ctx):
@@ -1020,42 +1070,46 @@ async def check_winners_command(ctx):
         loading_msg = await ctx.send("🔍 Checking database for new winners...")
         
         async with burp_bot.db_pool.acquire() as conn:
-            # Get recent winners
-            recent_winners = await conn.fetch(
-                """SELECT id, winner_address, prize_amount, created_at, game_id
-                   FROM games 
-                   WHERE status = 'completed' AND winner_address IS NOT NULL 
-                   ORDER BY created_at DESC 
-                   LIMIT 5"""
+            # First, let's see what tables exist
+            tables = await conn.fetch(
+                """SELECT table_name 
+                   FROM information_schema.tables 
+                   WHERE table_schema = 'public' 
+                   AND table_name LIKE '%game%' OR table_name LIKE '%winner%' OR table_name LIKE '%streak%'
+                   ORDER BY table_name"""
             )
             
-            if not recent_winners:
-                await loading_msg.edit(content="ℹ️ No winners found in database")
+            if not tables:
+                await loading_msg.edit(content="❌ No game-related tables found. Use `!dbschema` to see all tables.")
                 return
             
             embed = discord.Embed(
-                title="Recent Winners in Database",
-                description="Last 5 winners found:",
+                title="Database Tables Found",
+                description="Game-related tables in your database:",
                 color=0x00ff00
             )
             
-            for i, winner in enumerate(recent_winners, 1):
-                time_ago = datetime.utcnow() - winner['created_at']
-                hours_ago = int(time_ago.total_seconds() // 3600)
+            for table in tables:
+                table_name = table['table_name']
                 
-                embed.add_field(
-                    name=f"Winner #{i}",
-                    value=f"Address: {winner['winner_address'][:12]}...\n"
-                          f"Prize: {winner['prize_amount']} ADA\n"
-                          f"Game: {winner['game_id']}\n"
-                          f"Time: {hours_ago}h ago",
-                    inline=True
-                )
+                # Try to get some sample data
+                try:
+                    sample_data = await conn.fetch(f"SELECT * FROM {table_name} LIMIT 3")
+                    embed.add_field(
+                        name=f"Table: {table_name}",
+                        value=f"Rows found: {len(sample_data)}",
+                        inline=True
+                    )
+                except Exception as e:
+                    embed.add_field(
+                        name=f"Table: {table_name}",
+                        value=f"Error: {str(e)[:50]}...",
+                        inline=True
+                    )
             
             embed.add_field(
-                name="Monitoring Status",
-                value=f"Last checked ID: {burp_bot.last_checked_winner_id}\n"
-                      f"Monitoring: {'✅ Active' if burp_bot.monitoring_task else '❌ Inactive'}",
+                name="Next Steps",
+                value="Use `!dbschema` to see full database structure",
                 inline=False
             )
             
