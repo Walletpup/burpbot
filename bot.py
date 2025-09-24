@@ -901,23 +901,17 @@ async def help_command(interaction: discord.Interaction):
     """Help command showing all available bot commands"""
     try:
         embed = discord.Embed(
-            title="🍔 Burp Bot Help",
+            title="Burp Bot Help",
             description="Welcome to the ultimate burp bot! Here are all available commands:",
             color=0x00ff6b
         )
         
         # Bot commands section
         embed.add_field(
-            name="Fun Commands",
+            name="Commands",
             value="`/burp` - Post a random burp sound from our collection\n"
-                  "`/burpfact` - Get a random interesting burp fact",
-            inline=False
-        )
-        
-        # Info commands
-        embed.add_field(
-            name="Info Commands",
-            value="`/stats` - Show Gas Streaks and community statistics",
+                  "`/burpfact` - Get a random interesting burp fact"
+                  "`/stats` - Show Gas Streaks and community statistics",
             inline=False
         )
         # Community links
