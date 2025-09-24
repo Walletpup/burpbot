@@ -530,6 +530,9 @@ async def on_ready():
     # Send links embed to links channel
     await send_links_embed()
     
+    # Send verification embed to verification channel
+    await send_verification_embed()
+    
     # Set bot status
     await bot.change_presence(
         activity=discord.Activity(
@@ -843,7 +846,6 @@ async def send_links_embed():
             title="Burp Community Links",
             description="Important links for our community",
             color=0x00ff00,
-            timestamp=datetime.utcnow()
         )
         
         for name, url in BURP_LINKS.items():
@@ -863,7 +865,6 @@ async def send_links_embed():
         except:
             thumbnail_url = "https://www.burpcoin.site/favicon.ico"
         
-        embed.set_footer(text="Stay connected with Burp!", icon_url="https://www.burpcoin.site/favicon.ico")
         embed.set_thumbnail(url=thumbnail_url)
         
         await channel.send(embed=embed)
@@ -871,6 +872,55 @@ async def send_links_embed():
         
     except Exception as e:
         logger.error(f"Error sending links embed: {e}")
+
+async def send_verification_embed():
+    """Send verification instructions to verification channel on startup"""
+    try:
+        channel = bot.get_channel(VERIFICATION_CHANNEL)
+        if not channel:
+            logger.error(f"Could not find verification channel {VERIFICATION_CHANNEL}")
+            return
+        
+        # Clear previous messages (optional)
+        async for message in channel.history(limit=10):
+            if message.author == bot.user:
+                await message.delete()
+        
+        embed = discord.Embed(
+            title="Verification Required",
+            description="Get your Burper role to access the full server!",
+            color=0x00ff00,
+        )
+        
+        embed.add_field(
+            name="How to Verify",
+            value="Type `!verify` to start the verification process",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="What You Get",
+            value="• Access to all channels\n• Burper role\n• Community privileges",
+            inline=False
+        )
+        
+        # Get the specified user's avatar for thumbnail
+        try:
+            target_user = bot.get_user(1419117925465460878)
+            if target_user:
+                thumbnail_url = target_user.display_avatar.url
+            else:
+                thumbnail_url = "https://www.burpcoin.site/favicon.ico"
+        except:
+            thumbnail_url = "https://www.burpcoin.site/favicon.ico"
+        
+        embed.set_thumbnail(url=thumbnail_url)
+        
+        await channel.send(embed=embed)
+        logger.info("Sent verification embed to verification channel")
+        
+    except Exception as e:
+        logger.error(f"Error sending verification embed: {e}")
 
 # API endpoints for external integration
 @bot.command(name='announce_winner', hidden=True)
