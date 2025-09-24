@@ -190,6 +190,30 @@ class BurpBot:
         except Exception as e:
             logger.error(f"Error processing new winner: {e}")
     
+    async def check_and_announce_new_prize_pool(self):
+        """Check current prize pool and announce if it's substantial"""
+        try:
+            if not self.db_pool:
+                return
+            
+            async with self.db_pool.acquire() as conn:
+                # Get current prize pool
+                current_pool = await conn.fetchrow(
+                    "SELECT total_amount FROM gas_streak_prize_pool ORDER BY id DESC LIMIT 1"
+                )
+                
+                if current_pool and current_pool['total_amount'] > 100:  # Only announce if pool > 100 BURP
+                    pool_data = {
+                        'total_prize': str(int(float(current_pool['total_amount']))),
+                        'game_id': f"pool-{int(datetime.utcnow().timestamp())}"
+                    }
+                    
+                    logger.info(f"Announcing new prize pool: {pool_data['total_prize']} BURP")
+                    await self.send_new_prize_pool_announcement(pool_data)
+                    
+        except Exception as e:
+            logger.error(f"Error checking prize pool: {e}")
+    
     async def monitor_new_games(self):
         """Background task to monitor for prize pool changes"""
         last_prize_amount = None
@@ -412,42 +436,53 @@ class BurpBot:
                 return
             
             embed = discord.Embed(
-                title="🎉 GAS STREAKS WINNER! 🎉",
-                description=f"Congratulations to our latest winner!",
-                color=0x00ff00,
-                timestamp=datetime.utcnow()
+                title="GAS STREAKS WINNER!",
+                description="Congratulations to our latest winner!",
+                color=0x00ff00
             )
+            
+            # Get winner address and create pool.pm link
+            winner_address = winner_data.get('winner_address', 'Unknown')
+            if len(winner_address) > 20:
+                # Truncate address: first 8 + ... + last 8 characters
+                truncated_address = f"{winner_address[:8]}...{winner_address[-8:]}"
+            else:
+                truncated_address = winner_address
+            
+            # Create pool.pm link
+            pool_pm_link = f"https://pool.pm/{winner_address}"
             
             # Add winner information
             embed.add_field(
-                name="🏆 Winner",
-                value=f"**{winner_data.get('winner_address', 'Unknown')}**",
+                name="Winner",
+                value=f"```[{truncated_address}]({pool_pm_link})```",
                 inline=False
             )
             
+            # Format prize amount as whole number
+            try:
+                prize_amount = float(winner_data.get('prize_amount', '0'))
+                prize_formatted = f"{int(prize_amount):,}"
+            except:
+                prize_formatted = winner_data.get('prize_amount', 'N/A')
+            
             embed.add_field(
-                name="💰 Prize Won",
-                value=f"**{winner_data.get('prize_amount', 'N/A')} ADA**",
+                name="Prize Won",
+                value=f"```{prize_formatted} BURP```",
                 inline=True
             )
             
             embed.add_field(
-                name="🎯 Streak Length",
-                value=f"**{winner_data.get('streak_length', 'N/A')}**",
+                name="Streak Length",
+                value=f"```{winner_data.get('streak_length', 'N/A')}```",
                 inline=True
             )
-            
-            embed.add_field(
-                name="🎲 Game ID",
-                value=f"`{winner_data.get('game_id', 'N/A')}`",
-                inline=True
-            )
-            
-            embed.set_footer(text="Burp Gas Streaks", icon_url="https://www.burpcoin.site/favicon.ico")
-            embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1234567890123456789.png")  # You can replace with actual burp emoji
             
             await channel.send(embed=embed)
-            logger.info(f"Sent winner announcement for game {winner_data.get('game_id')}")
+            logger.info(f"Sent winner announcement for {winner_address}")
+            
+            # After announcing winner, check if we should announce new prize pool
+            await self.check_and_announce_new_prize_pool()
             
         except Exception as e:
             logger.error(f"Error sending winner announcement: {e}")
@@ -461,40 +496,32 @@ class BurpBot:
                 return
             
             embed = discord.Embed(
-                title="🆕 NEW PRIZE POOL CREATED!",
+                title="NEW PRIZE POOL AVAILABLE!",
                 description="A fresh prize pool is ready for Gas Streaks!",
-                color=0x0099ff,
-                timestamp=datetime.utcnow()
+                color=0x0099ff
             )
             
+            # Format prize amount as whole number
+            try:
+                prize_amount = float(pool_data.get('total_prize', '0'))
+                prize_formatted = f"{int(prize_amount):,}"
+            except:
+                prize_formatted = pool_data.get('total_prize', 'N/A')
+            
             embed.add_field(
-                name="💎 Prize Pool",
-                value=f"**{pool_data.get('total_prize', 'N/A')} ADA**",
+                name="Prize Pool",
+                value=f"```{prize_formatted} BURP```",
                 inline=True
             )
             
             embed.add_field(
-                name="🎮 Game ID",
-                value=f"`{pool_data.get('game_id', 'N/A')}`",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="🚀 Status",
-                value="**ACTIVE**",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="🎯 How to Play",
+                name="How to Play",
                 value="Send **1.5 ADA + 1 BURP** to participate!\nGet **1 ADA refunded** automatically!",
                 inline=False
             )
             
-            embed.set_footer(text="Good luck, Burpers!", icon_url="https://www.burpcoin.site/favicon.ico")
-            
             await channel.send(embed=embed)
-            logger.info(f"Sent new prize pool announcement for game {pool_data.get('game_id')}")
+            logger.info(f"Sent new prize pool announcement: {prize_formatted} BURP")
             
         except Exception as e:
             logger.error(f"Error sending prize pool announcement: {e}")
@@ -533,6 +560,9 @@ async def on_ready():
     # Send verification embed to verification channel
     await send_verification_embed()
     
+    # Add persistent views for buttons
+    bot.add_view(VerificationView())
+    
     # Set bot status
     await bot.change_presence(
         activity=discord.Activity(
@@ -553,8 +583,7 @@ async def on_member_join(member):
         embed = discord.Embed(
             title=f"Welcome to Burp Community! 🎉",
             description=f"Hey {member.mention}! Welcome to the **Burp** community!",
-            color=0xff6b35,
-            timestamp=datetime.utcnow()
+            color=0xff6b35
         )
         
         embed.add_field(
@@ -570,7 +599,6 @@ async def on_member_join(member):
         )
         
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.set_footer(text=f"Member #{len(member.guild.members)}", icon_url=member.guild.icon.url if member.guild.icon else None)
         
         await channel.send(embed=embed)
         logger.info(f"Sent welcome message for {member.name}")
@@ -680,12 +708,6 @@ async def stats_command(ctx):
             inline=False
         )
         
-        # Add data source indicator
-        data_source = "Live Data" if stats_data != burp_bot.get_fallback_stats(ctx.guild) else "Cached Data"
-        embed.set_footer(
-            text=f"{data_source} • Use !verify to get @Burper role",
-            icon_url="https://www.burpcoin.site/favicon.ico"
-        )
         embed.set_thumbnail(url="https://www.burpcoin.site/favicon.ico")
         
         # Edit the loading message with the stats
@@ -699,53 +721,11 @@ async def stats_command(ctx):
         except:
             await ctx.send("❌ Error retrieving statistics. Please try again later.", delete_after=5)
 
-@bot.command(name='verify')
-async def verify_command(ctx):
-    """Start verification process"""
-    if ctx.channel.id != VERIFICATION_CHANNEL:
-        await ctx.send("❌ Please use this command in the verification channel!", delete_after=5)
-        return
-    
-    # Check if user already has the role
-    burper_role = discord.utils.get(ctx.guild.roles, name=BURPER_ROLE_NAME)
-    if burper_role and burper_role in ctx.author.roles:
-        await ctx.send("✅ You're already verified!", delete_after=5)
-        return
-    
-    # Generate random verification code
-    verification_code = ''.join(random.choices(string.digits, k=6))
-    verification_challenges[ctx.author.id] = verification_code
-    
-    embed = discord.Embed(
-        title="🔐 Verification Challenge",
-        description=f"{ctx.author.mention}, please type the following number to get verified:",
-        color=0x00ff00
-    )
-    
-    embed.add_field(
-        name="📱 Verification Code",
-        value=f"```{verification_code}```",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="⏰ Instructions",
-        value="Type the exact number above to receive your @Burper role!",
-        inline=False
-    )
-    
-    embed.set_footer(text="This code expires in 5 minutes")
-    
-    await ctx.send(embed=embed)
-    
-    # Remove challenge after 5 minutes
-    await asyncio.sleep(300)
-    if ctx.author.id in verification_challenges:
-        del verification_challenges[ctx.author.id]
+# Old verification command removed - now using button system
 
 @bot.event
 async def on_message(message):
-    """Handle verification responses and other messages"""
+    """Handle auto-moderation and other messages"""
     if message.author.bot:
         return
     
@@ -756,50 +736,7 @@ async def on_message(message):
             await burp_bot.handle_discord_invite(message)
             return  # Don't process further if message was moderated
     
-    # Handle verification in verification channel
-    if message.channel.id == VERIFICATION_CHANNEL and message.author.id in verification_challenges:
-        expected_code = verification_challenges[message.author.id]
-        
-        if message.content.strip() == expected_code:
-            # Grant Burper role
-            burper_role = discord.utils.get(message.guild.roles, name=BURPER_ROLE_NAME)
-            
-            if burper_role:
-                try:
-                    await message.author.add_roles(burper_role)
-                    
-                    embed = discord.Embed(
-                        title="✅ Verification Successful!",
-                        description=f"Welcome to the community, {message.author.mention}!",
-                        color=0x00ff00
-                    )
-                    
-                    embed.add_field(
-                        name="🎉 Role Granted",
-                        value=f"You now have the **@{BURPER_ROLE_NAME}** role!",
-                        inline=False
-                    )
-                    
-                    embed.add_field(
-                        name="🚀 What's Next?",
-                        value="• Explore our channels\n• Try Gas Streaks\n• Join the community discussions!",
-                        inline=False
-                    )
-                    
-                    await message.channel.send(embed=embed)
-                    
-                    # Remove from challenges
-                    del verification_challenges[message.author.id]
-                    
-                    logger.info(f"Verified user {message.author.name}")
-                    
-                except Exception as e:
-                    logger.error(f"Error granting role: {e}")
-                    await message.channel.send("❌ Error granting role. Please contact an admin.")
-            else:
-                await message.channel.send("❌ Burper role not found. Please contact an admin.")
-        else:
-            await message.channel.send("❌ Incorrect code. Please try `!verify` again.", delete_after=5)
+    # Verification is now handled by button interactions
     
     # Process other commands
     await bot.process_commands(message)
@@ -873,6 +810,223 @@ async def send_links_embed():
     except Exception as e:
         logger.error(f"Error sending links embed: {e}")
 
+class VerificationView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # Persistent view
+    
+    @discord.ui.button(label='Start Captcha', style=discord.ButtonStyle.green, emoji='🔐')
+    async def start_captcha(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Check if user already has the role
+        burper_role = discord.utils.get(interaction.guild.roles, name=BURPER_ROLE_NAME)
+        if burper_role and burper_role in interaction.user.roles:
+            await interaction.response.send_message("✅ You're already verified!", ephemeral=True)
+            return
+        
+        # Generate random 4-digit code
+        captcha_code = ''.join(random.choices(string.digits, k=4))
+        verification_challenges[interaction.user.id] = captcha_code
+        
+        # Create captcha embed
+        embed = discord.Embed(
+            title="🔐 Captcha Verification",
+            description=f"Enter this code using the buttons below:",
+            color=0x00ff00
+        )
+        
+        embed.add_field(
+            name="Your Code",
+            value=f"```{captcha_code}```",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="Instructions",
+            value="Click the number buttons below to enter your code",
+            inline=False
+        )
+        
+        # Send ephemeral message with keypad
+        view = KeypadView(captcha_code, interaction.user.id)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        
+        # Remove challenge after 5 minutes
+        await asyncio.sleep(300)
+        if interaction.user.id in verification_challenges:
+            del verification_challenges[interaction.user.id]
+
+class KeypadView(discord.ui.View):
+    def __init__(self, correct_code: str, user_id: int):
+        super().__init__(timeout=300)  # 5 minute timeout
+        self.correct_code = correct_code
+        self.user_id = user_id
+        self.entered_code = ""
+    
+    async def update_display(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="🔐 Captcha Verification",
+            description=f"Enter this code using the buttons below:",
+            color=0x00ff00
+        )
+        
+        embed.add_field(
+            name="Your Code",
+            value=f"```{self.correct_code}```",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="Entered",
+            value=f"```{self.entered_code + '_' * (4 - len(self.entered_code))}```",
+            inline=False
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=self)
+    
+    async def check_code(self, interaction: discord.Interaction):
+        if self.entered_code == self.correct_code:
+            # Grant role
+            burper_role = discord.utils.get(interaction.guild.roles, name=BURPER_ROLE_NAME)
+            if burper_role:
+                try:
+                    await interaction.user.add_roles(burper_role)
+                    
+                    success_embed = discord.Embed(
+                        title="✅ Verification Successful!",
+                        description=f"Welcome to the Burp community! You now have the {burper_role.mention} role.",
+                        color=0x00ff00
+                    )
+                    
+                    await interaction.response.edit_message(embed=success_embed, view=None)
+                    
+                    # Clean up
+                    if self.user_id in verification_challenges:
+                        del verification_challenges[self.user_id]
+                    
+                    logger.info(f"Verified user {interaction.user.name} via captcha")
+                    
+                except Exception as e:
+                    logger.error(f"Error granting role: {e}")
+                    error_embed = discord.Embed(
+                        title="❌ Error",
+                        description="Error granting role. Please contact an admin.",
+                        color=0xff0000
+                    )
+                    await interaction.response.edit_message(embed=error_embed, view=None)
+            else:
+                error_embed = discord.Embed(
+                    title="❌ Error",
+                    description="Burper role not found. Please contact an admin.",
+                    color=0xff0000
+                )
+                await interaction.response.edit_message(embed=error_embed, view=None)
+        else:
+            # Wrong code
+            error_embed = discord.Embed(
+                title="❌ Incorrect Code",
+                description="The code you entered is incorrect. Please try again.",
+                color=0xff0000
+            )
+            
+            # Reset for retry
+            self.entered_code = ""
+            await interaction.response.edit_message(embed=error_embed, view=self)
+    
+    # Number buttons (0-9)
+    @discord.ui.button(label='1', style=discord.ButtonStyle.secondary, row=0)
+    async def button_1(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if len(self.entered_code) < 4:
+            self.entered_code += '1'
+            if len(self.entered_code) == 4:
+                await self.check_code(interaction)
+            else:
+                await self.update_display(interaction)
+    
+    @discord.ui.button(label='2', style=discord.ButtonStyle.secondary, row=0)
+    async def button_2(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if len(self.entered_code) < 4:
+            self.entered_code += '2'
+            if len(self.entered_code) == 4:
+                await self.check_code(interaction)
+            else:
+                await self.update_display(interaction)
+    
+    @discord.ui.button(label='3', style=discord.ButtonStyle.secondary, row=0)
+    async def button_3(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if len(self.entered_code) < 4:
+            self.entered_code += '3'
+            if len(self.entered_code) == 4:
+                await self.check_code(interaction)
+            else:
+                await self.update_display(interaction)
+    
+    @discord.ui.button(label='4', style=discord.ButtonStyle.secondary, row=1)
+    async def button_4(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if len(self.entered_code) < 4:
+            self.entered_code += '4'
+            if len(self.entered_code) == 4:
+                await self.check_code(interaction)
+            else:
+                await self.update_display(interaction)
+    
+    @discord.ui.button(label='5', style=discord.ButtonStyle.secondary, row=1)
+    async def button_5(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if len(self.entered_code) < 4:
+            self.entered_code += '5'
+            if len(self.entered_code) == 4:
+                await self.check_code(interaction)
+            else:
+                await self.update_display(interaction)
+    
+    @discord.ui.button(label='6', style=discord.ButtonStyle.secondary, row=1)
+    async def button_6(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if len(self.entered_code) < 4:
+            self.entered_code += '6'
+            if len(self.entered_code) == 4:
+                await self.check_code(interaction)
+            else:
+                await self.update_display(interaction)
+    
+    @discord.ui.button(label='7', style=discord.ButtonStyle.secondary, row=2)
+    async def button_7(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if len(self.entered_code) < 4:
+            self.entered_code += '7'
+            if len(self.entered_code) == 4:
+                await self.check_code(interaction)
+            else:
+                await self.update_display(interaction)
+    
+    @discord.ui.button(label='8', style=discord.ButtonStyle.secondary, row=2)
+    async def button_8(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if len(self.entered_code) < 4:
+            self.entered_code += '8'
+            if len(self.entered_code) == 4:
+                await self.check_code(interaction)
+            else:
+                await self.update_display(interaction)
+    
+    @discord.ui.button(label='9', style=discord.ButtonStyle.secondary, row=2)
+    async def button_9(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if len(self.entered_code) < 4:
+            self.entered_code += '9'
+            if len(self.entered_code) == 4:
+                await self.check_code(interaction)
+            else:
+                await self.update_display(interaction)
+    
+    @discord.ui.button(label='Clear', style=discord.ButtonStyle.danger, row=3)
+    async def button_clear(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.entered_code = ""
+        await self.update_display(interaction)
+    
+    @discord.ui.button(label='0', style=discord.ButtonStyle.secondary, row=3)
+    async def button_0(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if len(self.entered_code) < 4:
+            self.entered_code += '0'
+            if len(self.entered_code) == 4:
+                await self.check_code(interaction)
+            else:
+                await self.update_display(interaction)
+
 async def send_verification_embed():
     """Send verification instructions to verification channel on startup"""
     try:
@@ -893,12 +1047,6 @@ async def send_verification_embed():
         )
         
         embed.add_field(
-            name="How to Verify",
-            value="Type `!verify` to start the verification process",
-            inline=False
-        )
-        
-        embed.add_field(
             name="What You Get",
             value="• Access to all channels\n• Burper role\n• Community privileges",
             inline=False
@@ -916,8 +1064,10 @@ async def send_verification_embed():
         
         embed.set_thumbnail(url=thumbnail_url)
         
-        await channel.send(embed=embed)
-        logger.info("Sent verification embed to verification channel")
+        # Send with verification button
+        view = VerificationView()
+        await channel.send(embed=embed, view=view)
+        logger.info("Sent verification embed with button to verification channel")
         
     except Exception as e:
         logger.error(f"Error sending verification embed: {e}")
