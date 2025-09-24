@@ -663,21 +663,11 @@ async def purge_command(interaction: discord.Interaction, amount: int):
         except:
             pass
 
-@bot.tree.command(name='burp', description='Play a random burp sound in voice chat!')
+@bot.tree.command(name='burp', description='Post a random burp sound!')
 async def burp_command(interaction: discord.Interaction):
-    """Fun command that plays actual burp sounds in voice channels"""
+    """Fun command that posts actual burp sound files"""
     try:
-        # Check if user is in a voice channel
-        if not interaction.user.voice or not interaction.user.voice.channel:
-            embed = discord.Embed(
-                title="❌ No Voice Channel",
-                description="You need to be in a voice channel to use this command!",
-                color=0xff0000
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        
-        # Defer response since voice operations can take time
+        # Defer response since file operations can take time
         await interaction.response.defer()
         
         # Get all burp sound files
@@ -701,83 +691,34 @@ async def burp_command(interaction: discord.Interaction):
         selected_burp = random.choice(burp_files)
         burp_filename = os.path.basename(selected_burp)
         
-        # Connect to voice channel
-        voice_channel = interaction.user.voice.channel
+        # Create success embed
+        embed = discord.Embed(
+            title="BURP ALERT",
+            description=f"**{interaction.user.display_name}** just burped!",
+            color=0x00ff6b
+        )
         
-        try:
-            # Check if bot is already connected to a voice channel in this guild
-            voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
-            
-            if voice_client is None:
-                # Connect to the voice channel
-                voice_client = await voice_channel.connect()
-            elif voice_client.channel != voice_channel:
-                # Move to the user's voice channel
-                await voice_client.move_to(voice_channel)
-            
-            # Stop any currently playing audio
-            if voice_client.is_playing():
-                voice_client.stop()
-            
-            # Play the burp sound
-            audio_source = discord.FFmpegPCMAudio(selected_burp)
-            voice_client.play(audio_source)
-            
-            # Create success embed
-            embed = discord.Embed(
-                title="BURP ALERT",
-                description=f"**{interaction.user.display_name}** just burped in {voice_channel.mention}!",
-                color=0x00ff6b
-            )
-            
-            embed.add_field(
-                name="🎵 Playing",
-                value=f"`{burp_filename}`",
-                inline=False
-            )
-            
-            # Add a random fun fact about burps
-            burp_facts = [
-                "Did you know? The average person burps 14 times a day!",
-                "Fun fact: Burps can travel up to 10 mph!",
-                "Burp trivia: The longest recorded burp lasted 2 minutes 42 seconds!",
-                "Did you know? Burping is called 'eructation' in medical terms!",
-                "Fun fact: Cows burp about 300-500 liters of methane per day!",
-                "Burp science: It's mostly nitrogen and carbon dioxide!",
-                "Did you know? In some cultures, burping after a meal is a compliment!",
-                "Fun fact: Babies need to burp because they swallow air while feeding!",
-                "Burp trivia: The sound comes from vibrations in your esophagus!",
-                "Did you know? Carbonated drinks make you burp more!"
-            ]
-            
-            embed.add_field(
-                name="💡 Burp Fact",
-                value=random.choice(burp_facts),
-                inline=False
-            )
-            
-            embed.set_footer(text=f"🎵 Burp #{burp_filename.split('.')[0]} | Powered by BURP!")
-            
-            await interaction.followup.send(embed=embed)
-            
-            # Wait for the audio to finish playing, then disconnect after a short delay
-            while voice_client.is_playing():
-                await asyncio.sleep(0.5)
-            
-            # Wait a bit then disconnect
-            await asyncio.sleep(2)
-            await voice_client.disconnect()
-            
-            logger.info(f"Burp command used by {interaction.user.name} - played {burp_filename}")
-            
-        except discord.errors.ClientException as e:
-            embed = discord.Embed(
-                title="❌ Voice Error",
-                description=f"Couldn't connect to voice channel: {str(e)}",
-                color=0xff0000
-            )
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            
+        embed.add_field(
+            name="🎵 Burp Sound",
+            value=f"`{burp_filename}`",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="💡 Want a burp fact?",
+            value="Use `/burpfact` to learn something new!",
+            inline=False
+        )
+        
+        embed.set_footer(text=f"🎵 Burp #{burp_filename.split('.')[0]} | Powered by BURP!")
+        
+        # Send the embed with the audio file as attachment
+        with open(selected_burp, 'rb') as audio_file:
+            discord_file = discord.File(audio_file, filename=burp_filename)
+            await interaction.followup.send(embed=embed, file=discord_file)
+        
+        logger.info(f"Burp command used by {interaction.user.name} - posted {burp_filename}")
+        
     except Exception as e:
         logger.error(f"Error in burp command: {e}")
         try:
@@ -785,6 +726,86 @@ async def burp_command(interaction: discord.Interaction):
                 await interaction.followup.send("❌ Oops! My burp got stuck! Try again later.", ephemeral=True)
             else:
                 await interaction.response.send_message("❌ Oops! My burp got stuck! Try again later.", ephemeral=True)
+        except:
+            pass
+
+@bot.tree.command(name='burpfact', description='Get a random fun fact about burps!')
+async def burpfact_command(interaction: discord.Interaction):
+    """Command that shares random fun facts about burps"""
+    try:
+        # Extensive list of burp facts
+        burp_facts = [
+            "Did you know? The average person burps 14 times a day!",
+            "Fun fact: Burps can travel up to 10 mph!",
+            "Burp trivia: The longest recorded burp lasted 2 minutes 42 seconds!",
+            "Did you know? Burping is called 'eructation' in medical terms!",
+            "Fun fact: Cows burp about 300-500 liters of methane per day!",
+            "Burp science: It's mostly nitrogen and carbon dioxide!",
+            "Did you know? In some cultures, burping after a meal is a compliment!",
+            "Fun fact: Babies need to burp because they swallow air while feeding!",
+            "Burp trivia: The sound comes from vibrations in your esophagus!",
+            "Did you know? Carbonated drinks make you burp more!",
+            "Fun fact: Fish can't burp because they don't have stomachs!",
+            "Burp science: Your stomach can hold up to 4 liters of gas!",
+            "Did you know? Astronauts can't burp in space due to zero gravity!",
+            "Fun fact: The word 'burp' was first used in 1932!",
+            "Burp trivia: Some people can burp on command by swallowing air!",
+            "Did you know? Burping releases pressure that could otherwise cause pain!",
+            "Fun fact: Dogs and cats can burp too, but rarely do!",
+            "Burp science: Helium makes your burps sound higher pitched!",
+            "Did you know? Newborns burp more than adults because they swallow more air!",
+            "Fun fact: The loudest burp ever recorded was 109.9 decibels!",
+            "Burp trivia: Chewing gum makes you swallow more air and burp more!",
+            "Did you know? Burping after drinking milk is more common due to lactose!",
+            "Fun fact: Some birds can burp, but most cannot!",
+            "Burp science: Eating too fast increases burping by 300%!",
+            "Did you know? Burps smell because of hydrogen sulfide gas!",
+            "Fun fact: The ancient Romans considered burping a sign of appreciation!",
+            "Burp trivia: Drinking through straws increases air intake and burping!",
+            "Did you know? Burping can actually help prevent bloating and discomfort!",
+            "Fun fact: Pregnant women burp more due to hormonal changes!",
+            "Burp science: Cold drinks cause more burping than warm ones!",
+            "Did you know? Professional burpers exist and perform at events!",
+            "Fun fact: Burping competitions are held worldwide!",
+            "Burp trivia: The scientific term for excessive burping is 'aerophagia'!",
+            "Did you know? Burps can contain up to 59% nitrogen!",
+            "Fun fact: Eating beans increases burping due to complex sugars!",
+            "Burp science: Lying down after eating reduces burping!",
+            "Did you know? Some medications can increase or decrease burping!",
+            "Fun fact: Burping is one of the first sounds babies learn to control!",
+            "Burp trivia: The Guinness World Record for burping is highly contested!",
+            "Did you know? Burping helps prevent acid reflux in many people!",
+            "Fun fact: Different foods create different burp sounds and smells!",
+            "Burp science: Burping frequency decreases as you age!",
+            "Did you know? Some cultures have specific etiquette rules about burping!",
+            "Fun fact: Burping can be a sign of a healthy digestive system!",
+            "Burp trivia: The average burp lasts 2.5 seconds!",
+            "Did you know? Burping while talking can change your voice pitch!",
+            "Fun fact: Some people can burp the alphabet!",
+            "Burp science: Burping releases about 0.5 liters of gas on average!",
+            "Did you know? Burping competitions have judges who rate volume and duration!",
+            "Fun fact: The fear of burping in public is called 'aerophobia'!"
+        ]
+        
+        # Select a random fact
+        random_fact = random.choice(burp_facts)
+        
+        # Create embed
+        embed = discord.Embed(
+            title="💡 Burp Fact Time!",
+            description=random_fact,
+            color=0x00ff6b
+        )
+        
+        embed.set_footer(text=f"Burp Fact #{random.randint(1, len(burp_facts))} | Powered by BURP!")
+        
+        await interaction.response.send_message(embed=embed)
+        logger.info(f"Burp fact command used by {interaction.user.name}")
+        
+    except Exception as e:
+        logger.error(f"Error in burpfact command: {e}")
+        try:
+            await interaction.response.send_message("❌ Oops! My burp facts got stuck! Try again later.", ephemeral=True)
         except:
             pass
 
