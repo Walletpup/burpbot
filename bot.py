@@ -857,7 +857,7 @@ async def help_command(interaction: discord.Interaction):
         
         # Bot commands section
         embed.add_field(
-            name="🎵 Fun Commands",
+            name="Fun Commands",
             value="`/burp` - Post a random burp sound from our collection\n"
                   "`/burpfact` - Get a random interesting burp fact",
             inline=False
@@ -865,45 +865,19 @@ async def help_command(interaction: discord.Interaction):
         
         # Info commands
         embed.add_field(
-            name="📊 Info Commands",
-            value="`/stats` - Show Gas Streaks and community statistics\n"
-                  "`/help` - Show this help message",
+            name="Info Commands",
+            value="`/stats` - Show Gas Streaks and community statistics",
             inline=False
         )
-        
-        # Admin commands (only show if user is admin)
-        if interaction.user.id == ADMIN_USER_ID:
-            embed.add_field(
-                name="🔧 Admin Commands",
-                value="`/purge <amount>` - Delete messages in bulk\n"
-                      "`/automod [on/off/status]` - Control auto-moderation\n"
-                      "`!announce_winner` - Test winner announcement\n"
-                      "`!announce_pool` - Test prize pool announcement",
-                inline=False
-            )
-        
-        # Bot info
-        embed.add_field(
-            name="🤖 About This Bot",
-            value="• **100+ burp sounds** from our collection\n"
-                  "• **75+ curated burp facts** (no obvious ones!)\n"
-                  "• **Gas Streaks integration** for winner announcements\n"
-                  "• **Auto-moderation** for Discord invite links\n"
-                  "• **Verification system** with captcha buttons",
-            inline=False
-        )
-        
         # Community links
         embed.add_field(
-            name="🔗 Community Links",
+            name="Community Links",
             value="• [Official Website](https://www.burpcoin.site/)\n"
                   "• [Gas Streaks Game](https://www.burpcoin.site/gas-streaks)\n"
                   "• [Twitter/X](https://x.com/burpcoinada)",
             inline=False
         )
-        
-        embed.set_footer(text="Powered by BURP! 🚀 | Use /burp for instant burp sounds!")
-        
+                
         await interaction.response.send_message(embed=embed, ephemeral=True)
         logger.info(f"Help command used by {interaction.user.name}")
         
