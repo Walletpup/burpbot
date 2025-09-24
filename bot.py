@@ -9,6 +9,9 @@ from datetime import datetime
 import requests
 from typing import Optional
 import re
+import asyncpg
+import psycopg2
+from urllib.parse import urlparse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -63,21 +66,122 @@ BURP_LINKS = {
 class BurpBot:
     def __init__(self, bot):
         self.bot = bot
+        self.db_pool = None
+    
+    async def init_database(self):
+        """Initialize database connection pool"""
+        try:
+            database_url = os.environ.get('DATABASE_URL')
+            if not database_url:
+                logger.warning("DATABASE_URL not set, using fallback stats only")
+                return
+            
+            # Parse the database URL for asyncpg
+            parsed = urlparse(database_url)
+            
+            self.db_pool = await asyncpg.create_pool(
+                host=parsed.hostname,
+                port=parsed.port,
+                user=parsed.username,
+                password=parsed.password,
+                database=parsed.path[1:],  # Remove leading slash
+                ssl='require' if 'postgres://' in database_url else None,
+                min_size=1,
+                max_size=3
+            )
+            logger.info("Database connection pool initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {e}")
+            self.db_pool = None
     
     async def fetch_gas_streaks_stats(self):
-        """Fetch real-time stats from Gas Streaks API"""
+        """Fetch real-time stats from burpcoin database"""
         try:
-            # You can replace this URL with your actual Gas Streaks API endpoint
-            api_url = os.environ.get('GAS_STREAKS_API_URL', 'https://your-gas-streaks-api.com/api/stats')
-            
-            response = requests.get(api_url, timeout=10)
-            if response.status_code == 200:
-                return response.json()
-            else:
-                logger.warning(f"Failed to fetch stats from API: {response.status_code}")
+            if not self.db_pool:
+                logger.warning("Database not connected, using fallback stats")
                 return None
+            
+            async with self.db_pool.acquire() as conn:
+                # Query your burpcoin database for gas streaks stats
+                # Adjust these queries based on your actual database schema
+                
+                # Get active games count
+                active_games = await conn.fetchval(
+                    "SELECT COUNT(*) FROM games WHERE status = 'active'"
+                )
+                
+                # Get total players
+                total_players = await conn.fetchval(
+                    "SELECT COUNT(DISTINCT player_address) FROM game_entries"
+                )
+                
+                # Get completed games
+                games_completed = await conn.fetchval(
+                    "SELECT COUNT(*) FROM games WHERE status = 'completed'"
+                )
+                
+                # Get total ADA won
+                total_ada_won = await conn.fetchval(
+                    "SELECT COALESCE(SUM(prize_amount), 0) FROM games WHERE status = 'completed'"
+                )
+                
+                # Get active prize pools
+                active_pools = await conn.fetch(
+                    "SELECT prize_pool FROM games WHERE status = 'active'"
+                )
+                
+                # Get recent winner info
+                recent_winner = await conn.fetchrow(
+                    """SELECT winner_address, created_at, game_id 
+                       FROM games 
+                       WHERE status = 'completed' AND winner_address IS NOT NULL
+                       ORDER BY created_at DESC 
+                       LIMIT 1"""
+                )
+                
+                # Get recent game info
+                recent_game = await conn.fetchrow(
+                    """SELECT created_at, game_id 
+                       FROM games 
+                       ORDER BY created_at DESC 
+                       LIMIT 1"""
+                )
+                
+                # Calculate time differences
+                last_winner_time = "N/A"
+                last_game_time = "N/A"
+                
+                if recent_winner:
+                    time_diff = datetime.utcnow() - recent_winner['created_at']
+                    hours = int(time_diff.total_seconds() // 3600)
+                    last_winner_time = f"{hours} hours ago" if hours > 0 else "Less than 1 hour ago"
+                
+                if recent_game:
+                    time_diff = datetime.utcnow() - recent_game['created_at']
+                    minutes = int(time_diff.total_seconds() // 60)
+                    last_game_time = f"{minutes} minutes ago" if minutes > 0 else "Just now"
+                
+                # Format the response
+                return {
+                    "gas_streaks": {
+                        "active_games": active_games or 0,
+                        "total_players": total_players or 0,
+                        "games_completed": games_completed or 0,
+                        "total_ada_won": f"{total_ada_won or 0:,.0f}"
+                    },
+                    "prize_pools": {
+                        "pools": [float(pool['prize_pool']) for pool in active_pools] if active_pools else [],
+                        "total_active": f"{sum(float(pool['prize_pool']) for pool in active_pools) if active_pools else 0:,.0f}"
+                    },
+                    "recent_activity": {
+                        "last_winner": last_winner_time,
+                        "last_game": last_game_time,
+                        "last_winner_address": recent_winner['winner_address'][:12] + "..." if recent_winner else "N/A"
+                    }
+                }
+                
         except Exception as e:
-            logger.error(f"Error fetching stats from API: {e}")
+            logger.error(f"Error fetching stats from database: {e}")
             return None
     
     def get_fallback_stats(self, guild):
@@ -276,6 +380,9 @@ async def on_ready():
     """Bot startup event"""
     logger.info(f'{bot.user} has connected to Discord!')
     
+    # Initialize database connection
+    await burp_bot.init_database()
+    
     # Send links embed to links channel
     await send_links_embed()
     
@@ -331,12 +438,24 @@ async def stats_command(ctx):
         # Send a "loading" message first
         loading_msg = await ctx.send("📊 Fetching latest statistics...")
         
-        # Try to fetch real stats from API
+        # Try to fetch real stats from database
         stats_data = await burp_bot.fetch_gas_streaks_stats()
         
-        # If API fails, use fallback stats
+        # If database fails, use fallback stats
         if not stats_data:
             stats_data = burp_bot.get_fallback_stats(ctx.guild)
+        else:
+            # Add Discord community data to database stats
+            burper_role = discord.utils.get(ctx.guild.roles, name=BURPER_ROLE_NAME)
+            verified_count = len([m for m in ctx.guild.members if burper_role and burper_role in m.roles]) if burper_role else 0
+            online_count = len([m for m in ctx.guild.members if m.status != discord.Status.offline])
+            
+            stats_data["community"] = {
+                "discord_members": len(ctx.guild.members),
+                "verified_burpers": verified_count,
+                "online_now": online_count,
+                "bot_status": "Online ✅"
+            }
         
         embed = discord.Embed(
             title="📊 Burp Gas Streaks Statistics",
