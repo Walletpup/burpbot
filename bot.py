@@ -58,15 +58,19 @@ COMPILED_INVITE_PATTERNS = [re.compile(pattern, re.IGNORECASE) for pattern in DI
 
 # Links for the links channel
 BURP_LINKS = {
-    "🌐 Official Website": "https://www.burpcoin.site/",
-    "🎮 Gas Streaks Game": "https://www.burpcoin.site/gas-streaks",
-    "🐦 Twitter/X": "https://x.com/burpcoinada"
+    "Official Website": "https://www.burpcoin.site/",
+    "Gas Streaks Game": "https://www.burpcoin.site/gas-streaks",
+    "Twitter/X": "https://x.com/burpcoinada"
 }
 
 class BurpBot:
     def __init__(self, bot):
         self.bot = bot
         self.db_pool = None
+        self.last_checked_winner_id = None
+        self.last_checked_game_id = None
+        self.monitoring_task = None
+        self.pool_monitoring_task = None
     
     async def init_database(self):
         """Initialize database connection pool"""
@@ -93,6 +97,159 @@ class BurpBot:
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
             self.db_pool = None
+    
+    async def start_monitoring(self):
+        """Start monitoring database for new winners"""
+        if not self.db_pool:
+            logger.warning("Cannot start monitoring - database not connected")
+            return
+        
+        # Initialize the last checked winner ID
+        await self.init_last_winner_id()
+        
+        # Start the monitoring tasks
+        self.monitoring_task = asyncio.create_task(self.monitor_winners())
+        self.pool_monitoring_task = asyncio.create_task(self.monitor_new_games())
+        logger.info("Started database monitoring for new winners and games")
+    
+    async def init_last_winner_id(self):
+        """Initialize the last checked winner ID to avoid duplicate notifications"""
+        try:
+            async with self.db_pool.acquire() as conn:
+                # Get the most recent winner ID to start monitoring from
+                result = await conn.fetchrow(
+                    """SELECT id FROM games 
+                       WHERE status = 'completed' AND winner_address IS NOT NULL 
+                       ORDER BY created_at DESC 
+                       LIMIT 1"""
+                )
+                if result:
+                    self.last_checked_winner_id = result['id']
+                    logger.info(f"Initialized monitoring from winner ID: {self.last_checked_winner_id}")
+        except Exception as e:
+            logger.error(f"Error initializing last winner ID: {e}")
+    
+    async def monitor_winners(self):
+        """Background task to monitor for new winners"""
+        while True:
+            try:
+                if not self.db_pool:
+                    await asyncio.sleep(60)  # Wait 1 minute if no database
+                    continue
+                
+                async with self.db_pool.acquire() as conn:
+                    # Check for new winners since last check
+                    if self.last_checked_winner_id:
+                        query = """
+                            SELECT id, winner_address, prize_amount, created_at, game_id
+                            FROM games 
+                            WHERE status = 'completed' 
+                            AND winner_address IS NOT NULL 
+                            AND id > $1
+                            ORDER BY created_at ASC
+                        """
+                        new_winners = await conn.fetch(query, self.last_checked_winner_id)
+                    else:
+                        # First time check - get the most recent winner
+                        query = """
+                            SELECT id, winner_address, prize_amount, created_at, game_id
+                            FROM games 
+                            WHERE status = 'completed' 
+                            AND winner_address IS NOT NULL 
+                            ORDER BY created_at DESC 
+                            LIMIT 1
+                        """
+                        new_winners = await conn.fetch(query)
+                    
+                    # Process new winners
+                    for winner in new_winners:
+                        await self.process_new_winner(winner)
+                        self.last_checked_winner_id = winner['id']
+                
+                # Check every 30 seconds for new winners
+                await asyncio.sleep(30)
+                
+            except Exception as e:
+                logger.error(f"Error in winner monitoring: {e}")
+                await asyncio.sleep(60)  # Wait longer on error
+    
+    async def process_new_winner(self, winner_row):
+        """Process a new winner and send notification"""
+        try:
+            # Convert database row to winner data format
+            winner_data = {
+                'winner_address': winner_row['winner_address'],
+                'prize_amount': str(winner_row['prize_amount']),
+                'game_id': winner_row['game_id'],
+                'streak_length': 'N/A'  # You may need to adjust this based on your schema
+            }
+            
+            logger.info(f"New winner detected: {winner_data['winner_address']} won {winner_data['prize_amount']} ADA")
+            
+            # Send winner announcement
+            await self.send_winner_announcement(winner_data)
+            
+        except Exception as e:
+            logger.error(f"Error processing new winner: {e}")
+    
+    async def monitor_new_games(self):
+        """Background task to monitor for new games/prize pools"""
+        while True:
+            try:
+                if not self.db_pool:
+                    await asyncio.sleep(60)  # Wait 1 minute if no database
+                    continue
+                
+                async with self.db_pool.acquire() as conn:
+                    # Check for new games since last check
+                    if self.last_checked_game_id:
+                        query = """
+                            SELECT id, prize_pool, created_at, game_id
+                            FROM games 
+                            WHERE status = 'active' 
+                            AND id > $1
+                            ORDER BY created_at ASC
+                        """
+                        new_games = await conn.fetch(query, self.last_checked_game_id)
+                    else:
+                        # Initialize - get the most recent game ID
+                        result = await conn.fetchrow(
+                            """SELECT id FROM games 
+                               ORDER BY created_at DESC 
+                               LIMIT 1"""
+                        )
+                        if result:
+                            self.last_checked_game_id = result['id']
+                        new_games = []
+                    
+                    # Process new games
+                    for game in new_games:
+                        await self.process_new_game(game)
+                        self.last_checked_game_id = game['id']
+                
+                # Check every 45 seconds for new games
+                await asyncio.sleep(45)
+                
+            except Exception as e:
+                logger.error(f"Error in game monitoring: {e}")
+                await asyncio.sleep(60)  # Wait longer on error
+    
+    async def process_new_game(self, game_row):
+        """Process a new game and send prize pool notification"""
+        try:
+            # Convert database row to pool data format
+            pool_data = {
+                'total_prize': str(game_row['prize_pool']),
+                'game_id': game_row['game_id']
+            }
+            
+            logger.info(f"New game detected: {pool_data['game_id']} with {pool_data['total_prize']} ADA prize pool")
+            
+            # Send prize pool announcement
+            await self.send_new_prize_pool_announcement(pool_data)
+            
+        except Exception as e:
+            logger.error(f"Error processing new game: {e}")
     
     async def fetch_gas_streaks_stats(self):
         """Fetch real-time stats from burpcoin database"""
@@ -205,7 +362,7 @@ class BurpBot:
                 "discord_members": len(guild.members),
                 "verified_burpers": verified_count,
                 "online_now": online_count,
-                "bot_status": "Online ✅"
+                "bot_status": "Online"
             },
             "recent_activity": {
                 "last_winner": "N/A",
@@ -383,6 +540,16 @@ async def on_ready():
     # Initialize database connection
     await burp_bot.init_database()
     
+    # Start monitoring for new winners
+    await burp_bot.start_monitoring()
+    
+    # Sync slash commands
+    try:
+        synced = await bot.tree.sync()
+        logger.info(f"Synced {len(synced)} command(s)")
+    except Exception as e:
+        logger.error(f"Failed to sync commands: {e}")
+    
     # Send links embed to links channel
     await send_links_embed()
     
@@ -390,7 +557,7 @@ async def on_ready():
     await bot.change_presence(
         activity=discord.Activity(
             type=discord.ActivityType.watching,
-            name="Gas Streaks Winners 🎉"
+            name="The Burp Community"
         )
     )
 
@@ -431,12 +598,12 @@ async def on_member_join(member):
     except Exception as e:
         logger.error(f"Error sending welcome message: {e}")
 
-@bot.command(name='stats')
+@bot.hybrid_command(name='stats')
 async def stats_command(ctx):
     """Show Gas Streaks and Burp statistics - available to everyone"""
     try:
         # Send a "loading" message first
-        loading_msg = await ctx.send("📊 Fetching latest statistics...")
+        loading_msg = await ctx.send("Fetching latest statistics...")
         
         # Try to fetch real stats from database
         stats_data = await burp_bot.fetch_gas_streaks_stats()
@@ -458,7 +625,7 @@ async def stats_command(ctx):
             }
         
         embed = discord.Embed(
-            title="📊 Burp Gas Streaks Statistics",
+            title="Burp Gas Streaks Statistics",
             description="Current statistics for the Burp community and Gas Streaks game",
             color=0x00ff6b,
             timestamp=datetime.utcnow()
@@ -467,7 +634,7 @@ async def stats_command(ctx):
         # Gas Streaks Stats
         gas_stats = stats_data.get("gas_streaks", {})
         embed.add_field(
-            name="🎮 Gas Streaks Game",
+            name="Gas Streaks Game",
             value="```" +
                   f"Active Games: {gas_stats.get('active_games', 'N/A')}\n" +
                   f"Total Players: {gas_stats.get('total_players', 'N/A')}\n" +
@@ -486,7 +653,7 @@ async def stats_command(ctx):
             pool_text = "No active pools"
         
         embed.add_field(
-            name="💰 Current Prize Pools",
+            name="Current Prize Pools",
             value="```" +
                   pool_text + "\n" +
                   f"Total Active: {pool_stats.get('total_active', 'N/A')} ADA" +
@@ -497,12 +664,12 @@ async def stats_command(ctx):
         # Community Stats
         community_stats = stats_data.get("community", {})
         embed.add_field(
-            name="👥 Community Stats",
+            name="Community Stats",
             value="```" +
                   f"Discord Members: {community_stats.get('discord_members', len(ctx.guild.members))}\n" +
                   f"Verified Burpers: {community_stats.get('verified_burpers', 'N/A')}\n" +
                   f"Online Now: {community_stats.get('online_now', 'N/A')}\n" +
-                  f"Bot Status: {community_stats.get('bot_status', 'Online ✅')}" +
+                  f"Bot Status: {community_stats.get('bot_status', 'Online')}" +
                   "```",
             inline=False
         )
@@ -510,32 +677,31 @@ async def stats_command(ctx):
         # Recent Activity
         activity_stats = stats_data.get("recent_activity", {})
         embed.add_field(
-            name="🔥 Recent Activity",
+            name="Recent Activity",
             value="```" +
                   f"Last Winner: {activity_stats.get('last_winner', 'N/A')}\n" +
                   f"Last Game: {activity_stats.get('last_game', 'N/A')}\n" +
-                  f"New Members: {activity_stats.get('new_members_today', 'N/A')} today\n" +
-                  f"Messages: {activity_stats.get('messages_today', 'N/A')} today" +
+                  f"Winner Address: {activity_stats.get('last_winner_address', 'N/A')}" +
                   "```",
             inline=True
         )
         
         # Game Instructions
         embed.add_field(
-            name="🎯 How to Play",
+            name="How to Play",
             value="Send **1.5 ADA + 1 BURP** to participate!\nGet **1 ADA refunded** automatically!",
             inline=True
         )
         
         # Links
         embed.add_field(
-            name="🔗 Quick Links",
-            value="[🌐 Website](https://www.burpcoin.site/) • [🎮 Play Gas Streaks](https://www.burpcoin.site/gas-streaks) • [🐦 Twitter](https://x.com/burpcoinada)",
+            name="Quick Links",
+            value="[Website](https://www.burpcoin.site/) • [Play Gas Streaks](https://www.burpcoin.site/gas-streaks) • [Twitter](https://x.com/burpcoinada)",
             inline=False
         )
         
         # Add data source indicator
-        data_source = "🟢 Live Data" if stats_data != burp_bot.get_fallback_stats(ctx.guild) else "🟡 Cached Data"
+        data_source = "Live Data" if stats_data != burp_bot.get_fallback_stats(ctx.guild) else "Cached Data"
         embed.set_footer(
             text=f"{data_source} • Use !verify to get @Burper role",
             icon_url="https://www.burpcoin.site/favicon.ico"
@@ -697,9 +863,9 @@ async def send_links_embed():
                 await message.delete()
         
         embed = discord.Embed(
-            title="🔗 Burp Community Links",
-            description="Here are all the important links for our community!",
-            color=0xff6b35,
+            title="Burp Community Links",
+            description="Important links for our community",
+            color=0x00ff00,
             timestamp=datetime.utcnow()
         )
         
@@ -709,12 +875,6 @@ async def send_links_embed():
                 value=f"[Click Here]({url})",
                 inline=True
             )
-        
-        embed.add_field(
-            name="💡 About Burp",
-            value="Burp is a community-driven project on Cardano featuring Gas Streaks - an exciting game where you can win ADA!",
-            inline=False
-        )
         
         embed.set_footer(text="Stay connected with Burp!", icon_url="https://www.burpcoin.site/favicon.ico")
         embed.set_thumbnail(url="https://www.burpcoin.site/favicon.ico")
@@ -847,6 +1007,63 @@ async def test_invite_command(ctx):
         )
     
     await ctx.send(embed=embed)
+
+@bot.command(name='checkwinners', hidden=True)
+@is_admin_user()
+async def check_winners_command(ctx):
+    """Admin command to manually check for new winners"""
+    try:
+        if not burp_bot.db_pool:
+            await ctx.send("❌ Database not connected")
+            return
+        
+        loading_msg = await ctx.send("🔍 Checking database for new winners...")
+        
+        async with burp_bot.db_pool.acquire() as conn:
+            # Get recent winners
+            recent_winners = await conn.fetch(
+                """SELECT id, winner_address, prize_amount, created_at, game_id
+                   FROM games 
+                   WHERE status = 'completed' AND winner_address IS NOT NULL 
+                   ORDER BY created_at DESC 
+                   LIMIT 5"""
+            )
+            
+            if not recent_winners:
+                await loading_msg.edit(content="ℹ️ No winners found in database")
+                return
+            
+            embed = discord.Embed(
+                title="Recent Winners in Database",
+                description="Last 5 winners found:",
+                color=0x00ff00
+            )
+            
+            for i, winner in enumerate(recent_winners, 1):
+                time_ago = datetime.utcnow() - winner['created_at']
+                hours_ago = int(time_ago.total_seconds() // 3600)
+                
+                embed.add_field(
+                    name=f"Winner #{i}",
+                    value=f"Address: {winner['winner_address'][:12]}...\n"
+                          f"Prize: {winner['prize_amount']} ADA\n"
+                          f"Game: {winner['game_id']}\n"
+                          f"Time: {hours_ago}h ago",
+                    inline=True
+                )
+            
+            embed.add_field(
+                name="Monitoring Status",
+                value=f"Last checked ID: {burp_bot.last_checked_winner_id}\n"
+                      f"Monitoring: {'✅ Active' if burp_bot.monitoring_task else '❌ Inactive'}",
+                inline=False
+            )
+            
+            await loading_msg.edit(content=None, embed=embed)
+            
+    except Exception as e:
+        await ctx.send(f"❌ Error checking winners: {e}")
+        logger.error(f"Error in check_winners_command: {e}")
 
 # HTTP webhook endpoints (for integration with your gas streaks app)
 from flask import Flask, request, jsonify
