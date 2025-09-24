@@ -662,6 +662,82 @@ async def purge_command(interaction: discord.Interaction, amount: int):
         except:
             pass
 
+@bot.tree.command(name='burp', description='Make a random burp noise!')
+async def burp_command(interaction: discord.Interaction):
+    """Fun command that makes random burp noises"""
+    try:
+        # List of different burp sounds
+        burp_sounds = [
+            "BURRRRRP!",
+            "Buuuuurp!",
+            "BELCH!",
+            "Brrrrap!",
+            "BURRRRRRRRP!",
+            "burp",
+            "BUUUUUUURP!",
+            "Blurp!",
+            "BRAAAAAAP!",
+            "BURRRRP!",
+            "Buuurp!",
+            "BRRRRRRAP!",
+            "Buuuuurrrrrp!",
+            "BURP!",
+            "Brrrap!",
+            "BURRRRAP!",
+            "Buuuurrrp!",
+            "BELLLCH!",
+            "Burrrrrrrrrp!",
+            "BURRRRRRP!"
+        ]
+        
+        # Select a random burp sound
+        random_burp = random.choice(burp_sounds)
+        
+        # Create a fun embed
+        embed = discord.Embed(
+            title="BURP ALERT",
+            description=f"**{interaction.user.display_name}** just burped!",
+            color=0x00ff6b
+        )
+        
+        embed.add_field(
+            name="Burp Sound",
+            value=f"# {random_burp}",
+            inline=False
+        )
+        
+        # Add a random fun fact about burps
+        burp_facts = [
+            "Did you know? The average person burps 14 times a day!",
+            "Fun fact: Burps can travel up to 10 mph!",
+            "Burp trivia: The longest recorded burp lasted 2 minutes 42 seconds!",
+            "Did you know? Burping is called 'eructation' in medical terms!",
+            "Fun fact: Cows burp about 300-500 liters of methane per day!",
+            "Burp science: It's mostly nitrogen and carbon dioxide!",
+            "Did you know? In some cultures, burping after a meal is a compliment!",
+            "Fun fact: Babies need to burp because they swallow air while feeding!",
+            "Burp trivia: The sound comes from vibrations in your esophagus!",
+            "Did you know? Carbonated drinks make you burp more!"
+        ]
+        
+        embed.add_field(
+            name="💡 Burp Fact",
+            value=random.choice(burp_facts),
+            inline=False
+        )
+        
+        embed.set_footer(text="Powered by BURP! 🚀")
+        
+        await interaction.response.send_message(embed=embed)
+        logger.info(f"Burp command used by {interaction.user.name}")
+        
+    except Exception as e:
+        logger.error(f"Error in burp command: {e}")
+        try:
+            await interaction.response.send_message("❌ Oops! My burp got stuck! Try again later.", ephemeral=True)
+        except:
+            pass
+
 @bot.tree.command(name='stats', description='Show Gas Streaks and Burp statistics')
 async def stats_command(interaction: discord.Interaction):
     """Show Gas Streaks and Burp statistics - available to everyone"""
