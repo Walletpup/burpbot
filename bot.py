@@ -414,30 +414,11 @@ class BurpBot:
             # Delete the message
             await message.delete()
             
-            # Create warning embed
-            embed = discord.Embed(
-                title="🚫 Discord Invite Detected",
-                description=f"{message.author.mention}, Discord invite links are not allowed in this server!",
-                color=0xff0000,
-                timestamp=datetime.utcnow()
+            # Send simple warning message that auto-deletes
+            warning_msg = await message.channel.send(
+                f"❌ {message.author.mention}, can't do that here! Discord invite links are not allowed.",
+                delete_after=5
             )
-            
-            embed.add_field(
-                name="⚠️ Warning",
-                value="Please avoid posting Discord invite links. Repeated violations may result in further action.",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="📝 Original Message",
-                value=f"```{message.content[:100]}{'...' if len(message.content) > 100 else ''}```",
-                inline=False
-            )
-            
-            embed.set_footer(text="Auto-Moderation System")
-            
-            # Send warning message that deletes after 10 seconds
-            warning_msg = await message.channel.send(embed=embed, delete_after=10)
             
             # Log the moderation action
             logger.info(f"Deleted Discord invite from {message.author.name} ({message.author.id}) in #{message.channel.name}")
