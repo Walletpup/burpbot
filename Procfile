@@ -1,1 +1,1 @@
-worker: cd discord-bot && python bot.py
+worker: python bot.py
