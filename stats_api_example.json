@@ -1,0 +1,24 @@
+{
+  "gas_streaks": {
+    "active_games": 3,
+    "total_players": 1247,
+    "games_completed": 89,
+    "total_ada_won": "12,450"
+  },
+  "prize_pools": {
+    "pools": [450, 320, 180],
+    "total_active": "950"
+  },
+  "community": {
+    "discord_members": 1500,
+    "verified_burpers": 892,
+    "online_now": 234,
+    "bot_status": "Online ✅"
+  },
+  "recent_activity": {
+    "last_winner": "2 hours ago",
+    "last_game": "45 minutes ago",
+    "new_members_today": 12,
+    "messages_today": 234
+  }
+}
