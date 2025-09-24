@@ -23,6 +23,7 @@ intents.message_content = True
 intents.members = True
 intents.guilds = True
 
+bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Channel IDs
 BURP_WINNERS_CHANNEL = 1420198836768346244
