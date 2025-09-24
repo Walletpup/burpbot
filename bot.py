@@ -455,7 +455,7 @@ class BurpBot:
             # Add winner information
             embed.add_field(
                 name="Winner",
-                value=f"```[{truncated_address}]({pool_pm_link})```",
+                value=f"[{truncated_address}]({pool_pm_link})",
                 inline=False
             )
             
@@ -498,7 +498,7 @@ class BurpBot:
             embed = discord.Embed(
                 title="NEW PRIZE POOL AVAILABLE!",
                 description="A fresh prize pool is ready for Gas Streaks!",
-                color=0x0099ff
+                color=0x00ff00
             )
             
             # Format prize amount as whole number
@@ -512,12 +512,6 @@ class BurpBot:
                 name="Prize Pool",
                 value=f"```{prize_formatted} BURP```",
                 inline=True
-            )
-            
-            embed.add_field(
-                name="How to Play",
-                value="Send **1.5 ADA + 1 BURP** to participate!\nGet **1 ADA refunded** automatically!",
-                inline=False
             )
             
             await channel.send(embed=embed)
@@ -635,8 +629,7 @@ async def stats_command(ctx):
         embed = discord.Embed(
             title="Burp Gas Streaks Statistics",
             description="Current statistics for the Burp community and Gas Streaks game",
-            color=0x00ff6b,
-            timestamp=datetime.utcnow()
+            color=0x00ff6b
         )
         
         # Gas Streaks Stats
@@ -644,42 +637,19 @@ async def stats_command(ctx):
         embed.add_field(
             name="Gas Streaks Game",
             value="```" +
-                  f"Active Games: {gas_stats.get('active_games', 'N/A')}\n" +
                   f"Total Players: {gas_stats.get('total_players', 'N/A')}\n" +
                   f"Games Completed: {gas_stats.get('games_completed', 'N/A')}\n" +
-                  f"Total ADA Won: {gas_stats.get('total_ada_won', 'N/A')}" +
+                  f"Total BURP Won: {gas_stats.get('total_ada_won', 'N/A')}" +
                   "```",
             inline=True
         )
         
         # Prize Pool Stats
         pool_stats = stats_data.get("prize_pools", {})
-        pools = pool_stats.get("pools", [])
-        if pools:
-            pool_text = "\n".join([f"Pool #{i+1}: {pool} ADA" for i, pool in enumerate(pools[:3])])
-        else:
-            pool_text = "No active pools"
-        
         embed.add_field(
-            name="Current Prize Pools",
-            value="```" +
-                  pool_text + "\n" +
-                  f"Total Active: {pool_stats.get('total_active', 'N/A')} ADA" +
-                  "```",
+            name="Current Prize Pool",
+            value=f"```{pool_stats.get('total_active', 'N/A')} BURP```",
             inline=True
-        )
-        
-        # Community Stats
-        community_stats = stats_data.get("community", {})
-        embed.add_field(
-            name="Community Stats",
-            value="```" +
-                  f"Discord Members: {community_stats.get('discord_members', len(ctx.guild.members))}\n" +
-                  f"Verified Burpers: {community_stats.get('verified_burpers', 'N/A')}\n" +
-                  f"Online Now: {community_stats.get('online_now', 'N/A')}\n" +
-                  f"Bot Status: {community_stats.get('bot_status', 'Online')}" +
-                  "```",
-            inline=False
         )
         
         # Recent Activity
@@ -691,24 +661,8 @@ async def stats_command(ctx):
                   f"Last Game: {activity_stats.get('last_game', 'N/A')}\n" +
                   f"Winner Address: {activity_stats.get('last_winner_address', 'N/A')}" +
                   "```",
-            inline=True
-        )
-        
-        # Game Instructions
-        embed.add_field(
-            name="How to Play",
-            value="Send **1.5 ADA + 1 BURP** to participate!\nGet **1 ADA refunded** automatically!",
-            inline=True
-        )
-        
-        # Links
-        embed.add_field(
-            name="Quick Links",
-            value="[Website](https://www.burpcoin.site/) • [Play Gas Streaks](https://www.burpcoin.site/gas-streaks) • [Twitter](https://x.com/burpcoinada)",
             inline=False
         )
-        
-        embed.set_thumbnail(url="https://www.burpcoin.site/favicon.ico")
         
         # Edit the loading message with the stats
         await loading_msg.edit(content=None, embed=embed)
