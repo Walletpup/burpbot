@@ -12,6 +12,7 @@ import re
 import asyncpg
 import psycopg2
 from urllib.parse import urlparse
+import glob
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -662,79 +663,128 @@ async def purge_command(interaction: discord.Interaction, amount: int):
         except:
             pass
 
-@bot.tree.command(name='burp', description='Make a random burp noise!')
+@bot.tree.command(name='burp', description='Play a random burp sound in voice chat!')
 async def burp_command(interaction: discord.Interaction):
-    """Fun command that makes random burp noises"""
+    """Fun command that plays actual burp sounds in voice channels"""
     try:
-        # List of different burp sounds
-        burp_sounds = [
-            "BURRRRRP!",
-            "Buuuuurp!",
-            "BELCH!",
-            "Brrrrap!",
-            "BURRRRRRRRP!",
-            "burp",
-            "BUUUUUUURP!",
-            "Blurp!",
-            "BRAAAAAAP!",
-            "BURRRRP!",
-            "Buuurp!",
-            "BRRRRRRAP!",
-            "Buuuuurrrrrp!",
-            "BURP!",
-            "Brrrap!",
-            "BURRRRAP!",
-            "Buuuurrrp!",
-            "BELLLCH!",
-            "Burrrrrrrrrp!",
-            "BURRRRRRP!"
-        ]
+        # Check if user is in a voice channel
+        if not interaction.user.voice or not interaction.user.voice.channel:
+            embed = discord.Embed(
+                title="❌ No Voice Channel",
+                description="You need to be in a voice channel to use this command!",
+                color=0xff0000
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
         
-        # Select a random burp sound
-        random_burp = random.choice(burp_sounds)
+        # Defer response since voice operations can take time
+        await interaction.response.defer()
         
-        # Create a fun embed
-        embed = discord.Embed(
-            title="BURP ALERT",
-            description=f"**{interaction.user.display_name}** just burped!",
-            color=0x00ff6b
-        )
+        # Get all burp sound files
+        burp_folder = os.path.join(os.path.dirname(__file__), "burps")
+        burp_files = []
         
-        embed.add_field(
-            name="Burp Sound",
-            value=f"# {random_burp}",
-            inline=False
-        )
+        # Get all audio files from the burps folder
+        for ext in ["*.mp3", "*.wav"]:
+            burp_files.extend(glob.glob(os.path.join(burp_folder, ext)))
         
-        # Add a random fun fact about burps
-        burp_facts = [
-            "Did you know? The average person burps 14 times a day!",
-            "Fun fact: Burps can travel up to 10 mph!",
-            "Burp trivia: The longest recorded burp lasted 2 minutes 42 seconds!",
-            "Did you know? Burping is called 'eructation' in medical terms!",
-            "Fun fact: Cows burp about 300-500 liters of methane per day!",
-            "Burp science: It's mostly nitrogen and carbon dioxide!",
-            "Did you know? In some cultures, burping after a meal is a compliment!",
-            "Fun fact: Babies need to burp because they swallow air while feeding!",
-            "Burp trivia: The sound comes from vibrations in your esophagus!",
-            "Did you know? Carbonated drinks make you burp more!"
-        ]
+        if not burp_files:
+            embed = discord.Embed(
+                title="❌ No Burp Sounds Found",
+                description="No burp sound files found in the burps folder!",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
         
-        embed.add_field(
-            name="💡 Burp Fact",
-            value=random.choice(burp_facts),
-            inline=False
-        )
+        # Select a random burp file
+        selected_burp = random.choice(burp_files)
+        burp_filename = os.path.basename(selected_burp)
         
-        embed.set_footer(text="Powered by BURP! 🚀")
+        # Connect to voice channel
+        voice_channel = interaction.user.voice.channel
         
-        await interaction.response.send_message(embed=embed)
-        logger.info(f"Burp command used by {interaction.user.name}")
-        
+        try:
+            # Check if bot is already connected to a voice channel in this guild
+            voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
+            
+            if voice_client is None:
+                # Connect to the voice channel
+                voice_client = await voice_channel.connect()
+            elif voice_client.channel != voice_channel:
+                # Move to the user's voice channel
+                await voice_client.move_to(voice_channel)
+            
+            # Stop any currently playing audio
+            if voice_client.is_playing():
+                voice_client.stop()
+            
+            # Play the burp sound
+            audio_source = discord.FFmpegPCMAudio(selected_burp)
+            voice_client.play(audio_source)
+            
+            # Create success embed
+            embed = discord.Embed(
+                title="BURP ALERT",
+                description=f"**{interaction.user.display_name}** just burped in {voice_channel.mention}!",
+                color=0x00ff6b
+            )
+            
+            embed.add_field(
+                name="🎵 Playing",
+                value=f"`{burp_filename}`",
+                inline=False
+            )
+            
+            # Add a random fun fact about burps
+            burp_facts = [
+                "Did you know? The average person burps 14 times a day!",
+                "Fun fact: Burps can travel up to 10 mph!",
+                "Burp trivia: The longest recorded burp lasted 2 minutes 42 seconds!",
+                "Did you know? Burping is called 'eructation' in medical terms!",
+                "Fun fact: Cows burp about 300-500 liters of methane per day!",
+                "Burp science: It's mostly nitrogen and carbon dioxide!",
+                "Did you know? In some cultures, burping after a meal is a compliment!",
+                "Fun fact: Babies need to burp because they swallow air while feeding!",
+                "Burp trivia: The sound comes from vibrations in your esophagus!",
+                "Did you know? Carbonated drinks make you burp more!"
+            ]
+            
+            embed.add_field(
+                name="💡 Burp Fact",
+                value=random.choice(burp_facts),
+                inline=False
+            )
+            
+            embed.set_footer(text=f"🎵 Burp #{burp_filename.split('.')[0]} | Powered by BURP!")
+            
+            await interaction.followup.send(embed=embed)
+            
+            # Wait for the audio to finish playing, then disconnect after a short delay
+            while voice_client.is_playing():
+                await asyncio.sleep(0.5)
+            
+            # Wait a bit then disconnect
+            await asyncio.sleep(2)
+            await voice_client.disconnect()
+            
+            logger.info(f"Burp command used by {interaction.user.name} - played {burp_filename}")
+            
+        except discord.errors.ClientException as e:
+            embed = discord.Embed(
+                title="❌ Voice Error",
+                description=f"Couldn't connect to voice channel: {str(e)}",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            
     except Exception as e:
         logger.error(f"Error in burp command: {e}")
         try:
-            await interaction.response.send_message("❌ Oops! My burp got stuck! Try again later.", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send("❌ Oops! My burp got stuck! Try again later.", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Oops! My burp got stuck! Try again later.", ephemeral=True)
         except:
             pass
 
