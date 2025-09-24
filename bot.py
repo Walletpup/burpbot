@@ -622,70 +622,67 @@ async def on_member_join(member):
     except Exception as e:
         logger.error(f"Error sending welcome message: {e}")
 
-@bot.command(name='purge')
-@is_admin_user()
-async def purge_command(ctx, amount: int = 10):
+@bot.tree.command(name='purge', description='Delete messages in bulk (Admin only)')
+async def purge_command(interaction: discord.Interaction, amount: int = 10):
     """Admin command to delete messages in bulk"""
     try:
+        # Check if user is admin
+        if interaction.user.id != ADMIN_USER_ID:
+            await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+            return
+        
         # Validate amount
         if amount < 1:
-            await ctx.send("❌ Amount must be at least 1", delete_after=5)
+            await interaction.response.send_message("❌ Amount must be at least 1", ephemeral=True)
             return
         
         if amount > 100:
-            await ctx.send("❌ Cannot delete more than 100 messages at once", delete_after=5)
+            await interaction.response.send_message("❌ Cannot delete more than 100 messages at once", ephemeral=True)
             return
         
-        # Delete the command message first
-        try:
-            await ctx.message.delete()
-        except:
-            pass
+        # Defer response
+        await interaction.response.defer(ephemeral=True)
         
         # Purge messages
-        deleted = await ctx.channel.purge(limit=amount)
+        deleted = await interaction.channel.purge(limit=amount)
         
-        # Send confirmation message
-        confirmation = await ctx.send(f"🧹 Cleaned {len(deleted)} messages")
+        # Send confirmation
+        await interaction.followup.send(f"🧹 Cleaned {len(deleted)} messages", ephemeral=True)
         
-        # Auto-delete confirmation after 3 seconds
-        await asyncio.sleep(3)
-        try:
-            await confirmation.delete()
-        except:
-            pass
-        
-        logger.info(f"Admin {ctx.author.name} purged {len(deleted)} messages in #{ctx.channel.name}")
+        logger.info(f"Admin {interaction.user.name} purged {len(deleted)} messages in #{interaction.channel.name}")
         
     except discord.Forbidden:
-        await ctx.send("❌ I don't have permission to delete messages in this channel", delete_after=5)
+        await interaction.followup.send("❌ I don't have permission to delete messages in this channel", ephemeral=True)
     except discord.HTTPException as e:
-        await ctx.send(f"❌ Error deleting messages: {str(e)}", delete_after=5)
+        await interaction.followup.send(f"❌ Error deleting messages: {str(e)}", ephemeral=True)
     except Exception as e:
         logger.error(f"Error in purge command: {e}")
-        await ctx.send("❌ An error occurred while purging messages", delete_after=5)
+        try:
+            await interaction.followup.send("❌ An error occurred while purging messages", ephemeral=True)
+        except:
+            pass
 
-@bot.hybrid_command(name='stats')
-async def stats_command(ctx):
+@bot.tree.command(name='stats', description='Show Gas Streaks and Burp statistics')
+async def stats_command(interaction: discord.Interaction):
     """Show Gas Streaks and Burp statistics - available to everyone"""
     try:
-        # Send a "loading" message first
-        loading_msg = await ctx.send("Fetching latest statistics...")
+        # Defer response
+        await interaction.response.defer()
         
         # Try to fetch real stats from database
         stats_data = await burp_bot.fetch_gas_streaks_stats()
         
         # If database fails, use fallback stats
         if not stats_data:
-            stats_data = burp_bot.get_fallback_stats(ctx.guild)
+            stats_data = burp_bot.get_fallback_stats(interaction.guild)
         else:
             # Add Discord community data to database stats
-            burper_role = discord.utils.get(ctx.guild.roles, name=BURPER_ROLE_NAME)
-            verified_count = len([m for m in ctx.guild.members if burper_role and burper_role in m.roles]) if burper_role else 0
-            online_count = len([m for m in ctx.guild.members if m.status != discord.Status.offline])
+            burper_role = discord.utils.get(interaction.guild.roles, name=BURPER_ROLE_NAME)
+            verified_count = len([m for m in interaction.guild.members if burper_role and burper_role in m.roles]) if burper_role else 0
+            online_count = len([m for m in interaction.guild.members if m.status != discord.Status.offline])
             
             stats_data["community"] = {
-                "discord_members": len(ctx.guild.members),
+                "discord_members": len(interaction.guild.members),
                 "verified_burpers": verified_count,
                 "online_now": online_count,
                 "bot_status": "Online ✅"
@@ -733,16 +730,16 @@ async def stats_command(ctx):
             inline=False
         )
         
-        # Edit the loading message with the stats
-        await loading_msg.edit(content=None, embed=embed)
-        logger.info(f"Stats command used by {ctx.author.name}")
+        # Send the stats embed
+        await interaction.followup.send(embed=embed)
+        logger.info(f"Stats command used by {interaction.user.name}")
         
     except Exception as e:
         logger.error(f"Error in stats command: {e}")
         try:
-            await loading_msg.edit(content="❌ Error retrieving statistics. Please try again later.")
+            await interaction.followup.send("❌ Error retrieving statistics. Please try again later.")
         except:
-            await ctx.send("❌ Error retrieving statistics. Please try again later.", delete_after=5)
+            pass
 
 # Old verification command removed - now using button system
 
@@ -764,30 +761,7 @@ async def on_message(message):
     # Process other commands
     await bot.process_commands(message)
 
-@bot.event
-async def on_command_error(ctx, error):
-    """Handle command errors"""
-    if isinstance(error, commands.CheckFailure):
-        # This happens when someone tries to use an admin command without permission
-        embed = discord.Embed(
-            title="🚫 Access Denied",
-            description="You don't have permission to use this command.",
-            color=0xff0000
-        )
-        embed.add_field(
-            name="ℹ️ Info",
-            value="This command is restricted to the server administrator only.",
-            inline=False
-        )
-        await ctx.send(embed=embed, delete_after=10)
-        logger.warning(f"User {ctx.author.name} ({ctx.author.id}) tried to use admin command: {ctx.command}")
-    elif isinstance(error, commands.CommandNotFound):
-        # Ignore unknown commands
-        pass
-    else:
-        # Log other errors
-        logger.error(f"Command error: {error}")
-        await ctx.send("❌ An error occurred while processing the command.", delete_after=5)
+# Command error handling now handled within individual slash commands
 
 async def send_links_embed():
     """Send links embed to links channel on startup"""
@@ -1126,10 +1100,14 @@ async def announce_pool_command(ctx, *, pool_info):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
-@bot.command(name='automod', hidden=True)
-@is_admin_user()
-async def automod_command(ctx, action=None):
+@bot.tree.command(name='automod', description='Control auto-moderation (Admin only)')
+async def automod_command(interaction: discord.Interaction, action: str = None):
     """Admin command to control auto-moderation"""
+    # Check if user is admin
+    if interaction.user.id != ADMIN_USER_ID:
+        await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+        return
+    
     global auto_mod_enabled
     
     if action is None:
@@ -1143,7 +1121,7 @@ async def automod_command(ctx, action=None):
         
         embed.add_field(
             name="📋 Commands",
-            value="• `!automod on` - Enable auto-moderation\n• `!automod off` - Disable auto-moderation\n• `!automod status` - Check current status",
+            value="• `/automod on` - Enable auto-moderation\n• `/automod off` - Disable auto-moderation\n• `/automod status` - Check current status",
             inline=False
         )
         
@@ -1153,7 +1131,7 @@ async def automod_command(ctx, action=None):
             inline=False
         )
         
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         
     elif action.lower() in ['on', 'enable', 'true']:
         auto_mod_enabled = True
@@ -1162,8 +1140,8 @@ async def automod_command(ctx, action=None):
             description="Discord invite link moderation is now **enabled**",
             color=0x00ff00
         )
-        await ctx.send(embed=embed)
-        logger.info(f"Auto-moderation enabled by {ctx.author.name}")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        logger.info(f"Auto-moderation enabled by {interaction.user.name}")
         
     elif action.lower() in ['off', 'disable', 'false']:
         auto_mod_enabled = False
@@ -1172,15 +1150,15 @@ async def automod_command(ctx, action=None):
             description="Discord invite link moderation is now **disabled**",
             color=0xff0000
         )
-        await ctx.send(embed=embed)
-        logger.info(f"Auto-moderation disabled by {ctx.author.name}")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        logger.info(f"Auto-moderation disabled by {interaction.user.name}")
         
     elif action.lower() in ['status', 'check']:
         status = "🟢 Enabled" if auto_mod_enabled else "🔴 Disabled"
-        await ctx.send(f"Auto-moderation is currently **{status}**")
+        await interaction.response.send_message(f"Auto-moderation is currently **{status}**", ephemeral=True)
         
     else:
-        await ctx.send("❌ Invalid option. Use `on`, `off`, or `status`")
+        await interaction.response.send_message("❌ Invalid option. Use `on`, `off`, or `status`", ephemeral=True)
 
 @bot.command(name='testinvite', hidden=True)
 @is_admin_user()
