@@ -788,16 +788,9 @@ async def send_links_embed():
         
         embed = discord.Embed(
             title="Burp Community Links",
-            description="Important links for our community",
+            description="Official Website\nhttps://www.burpcoin.site/\n\nGas Streaks Game\nhttps://www.burpcoin.site/gas-streaks\n\nTwitter/X\nhttps://x.com/burpcoinada",
             color=0x00ff00,
         )
-        
-        for name, url in BURP_LINKS.items():
-            embed.add_field(
-                name=name,
-                value=f"[Click Here]({url})",
-                inline=True
-            )
         
         # Get the specified user's avatar for thumbnail
         try:
