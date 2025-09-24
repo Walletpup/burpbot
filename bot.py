@@ -231,20 +231,20 @@ class BurpBot:
                     )
                     
                     if current_pool and last_prize_amount is not None:
-                        current_amount = float(current_pool['total_amount'])
+                        current_amount = int(float(current_pool['total_amount']))
                         
                         # If prize pool increased significantly (new contributions)
-                        if current_amount > last_prize_amount + 50:  # 50+ ADA increase
+                        if current_amount > last_prize_amount + 50:  # 50+ BURP increase
                             pool_data = {
-                                'total_prize': str(current_amount),
-                                'game_id': f"pool-{int(datetime.utcnow().timestamp())}"
+                                'total_prize': f"{current_amount:,}",
+                                'game_id': f"game-{int(datetime.utcnow().timestamp())}"
                             }
                             
-                            logger.info(f"Prize pool increased to {current_amount} ADA")
+                            logger.info(f"Prize pool increased to {current_amount:,} BURP")
                             await self.send_new_prize_pool_announcement(pool_data)
                     
                     if current_pool:
-                        last_prize_amount = float(current_pool['total_amount'])
+                        last_prize_amount = int(float(current_pool['total_amount']))
                 
                 # Check every 2 minutes for prize pool changes
                 await asyncio.sleep(120)
@@ -325,16 +325,16 @@ class BurpBot:
                         "active_games": 1 if prize_pool and prize_pool['total_amount'] > 0 else 0,
                         "total_players": total_players or 0,
                         "games_completed": total_streaks or 0,
-                        "total_ada_won": f"{total_ada_won or 0:,.2f}"
+                        "total_ada_won": f"{int(total_ada_won or 0):,}"
                     },
                     "prize_pools": {
                         "pools": [float(prize_pool['total_amount'])] if prize_pool else [],
-                        "total_active": f"{float(prize_pool['total_amount']) if prize_pool else 0:,.2f}"
+                        "total_active": f"{int(float(prize_pool['total_amount'])) if prize_pool else 0:,}"
                     },
                     "recent_activity": {
                         "last_winner": last_winner_time,
                         "last_game": last_game_time,
-                        "last_winner_address": recent_winner['wallet_address'][:12] + "..." if recent_winner else "N/A"
+                        "last_amount_won": f"{int(float(recent_winner['prize_amount'])):,} BURP" if recent_winner else "N/A"
                     }
                 }
                 
@@ -600,6 +600,42 @@ async def on_member_join(member):
     except Exception as e:
         logger.error(f"Error sending welcome message: {e}")
 
+@bot.hybrid_command(name='purge')
+@is_admin_user()
+async def purge_command(ctx, amount: int = 10):
+    """Admin command to delete messages in bulk"""
+    try:
+        # Validate amount
+        if amount < 1:
+            await ctx.send("❌ Amount must be at least 1", delete_after=5)
+            return
+        
+        if amount > 100:
+            await ctx.send("❌ Cannot delete more than 100 messages at once", delete_after=5)
+            return
+        
+        # Delete the command message first
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+        
+        # Purge messages
+        deleted = await ctx.channel.purge(limit=amount)
+        
+        # Send confirmation message that auto-deletes
+        confirmation = await ctx.send(f"✅ Deleted {len(deleted)} messages", delete_after=3)
+        
+        logger.info(f"Admin {ctx.author.name} purged {len(deleted)} messages in #{ctx.channel.name}")
+        
+    except discord.Forbidden:
+        await ctx.send("❌ I don't have permission to delete messages in this channel", delete_after=5)
+    except discord.HTTPException as e:
+        await ctx.send(f"❌ Error deleting messages: {str(e)}", delete_after=5)
+    except Exception as e:
+        logger.error(f"Error in purge command: {e}")
+        await ctx.send("❌ An error occurred while purging messages", delete_after=5)
+
 @bot.hybrid_command(name='stats')
 async def stats_command(ctx):
     """Show Gas Streaks and Burp statistics - available to everyone"""
@@ -659,7 +695,7 @@ async def stats_command(ctx):
             value="```" +
                   f"Last Winner: {activity_stats.get('last_winner', 'N/A')}\n" +
                   f"Last Game: {activity_stats.get('last_game', 'N/A')}\n" +
-                  f"Winner Address: {activity_stats.get('last_winner_address', 'N/A')}" +
+                  f"Amount Won: {activity_stats.get('last_amount_won', 'N/A')}" +
                   "```",
             inline=False
         )
