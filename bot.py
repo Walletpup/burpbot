@@ -715,8 +715,8 @@ async def stats_command(ctx):
             name="Pool Stats",
             value="```" +
                   f"Current Pool: {pool_stats.get('total_active', 'N/A')} BURP\n" +
-                  f"Total Contributions: {pool_stats.get('total_contributions', 'N/A')}\n" +
-                  f"Total BURP Contributions: {pool_stats.get('total_burp_contributions', 'N/A')} BURP" +
+                  f"Total Releases: {pool_stats.get('total_contributions', 'N/A')}\n" +
+                  f"Total Contributions: {pool_stats.get('total_burp_contributions', 'N/A')} BURP" +
                   "```",
             inline=True
         )
