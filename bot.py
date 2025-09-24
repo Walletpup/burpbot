@@ -13,6 +13,7 @@ import asyncpg
 import psycopg2
 from urllib.parse import urlparse
 import glob
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -41,6 +42,11 @@ ADMIN_USER_ID = 1419117925465460878
 
 # Store verification challenges
 verification_challenges = {}
+
+# Command cooldowns (user_id -> last_used_timestamp)
+burp_cooldowns = {}
+burpfact_cooldowns = {}
+stats_cooldowns = {}
 
 # Auto-moderation settings
 auto_mod_enabled = True
@@ -552,6 +558,16 @@ def is_admin_user():
         return ctx.author.id == ADMIN_USER_ID
     return commands.check(predicate)
 
+def check_cooldown(user_id, cooldown_dict, cooldown_seconds):
+    """Check if user is on cooldown for a command"""
+    current_time = time.time()
+    if user_id in cooldown_dict:
+        time_passed = current_time - cooldown_dict[user_id]
+        if time_passed < cooldown_seconds:
+            return False, cooldown_seconds - time_passed
+    cooldown_dict[user_id] = current_time
+    return True, 0
+
 @bot.event
 async def on_ready():
     """Bot startup event"""
@@ -667,6 +683,16 @@ async def purge_command(interaction: discord.Interaction, amount: int):
 async def burp_command(interaction: discord.Interaction):
     """Fun command that posts actual burp sound files"""
     try:
+        # Check cooldown (10 seconds)
+        can_use, time_left = check_cooldown(interaction.user.id, burp_cooldowns, 10)
+        if not can_use:
+            embed = discord.Embed(
+                title="⏰ Cooldown Active",
+                description=f"Please wait {time_left:.1f} more seconds before using `/burp` again!",
+                color=0xff9900
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
         # Defer response since file operations can take time
         await interaction.response.defer()
         
@@ -712,6 +738,16 @@ async def burp_command(interaction: discord.Interaction):
 async def burpfact_command(interaction: discord.Interaction):
     """Command that shares random fun facts about burps"""
     try:
+        # Check cooldown (5 seconds)
+        can_use, time_left = check_cooldown(interaction.user.id, burpfact_cooldowns, 5)
+        if not can_use:
+            embed = discord.Embed(
+                title="⏰ Cooldown Active",
+                description=f"Please wait {time_left:.1f} more seconds before using `/burpfact` again!",
+                color=0xff9900
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
         # Curated list of interesting burp facts (removed obvious ones)
         burp_facts = [
             "The longest recorded burp lasted 2 minutes 42 seconds!",
@@ -778,7 +814,6 @@ async def burpfact_command(interaction: discord.Interaction):
             "Burps can carry odors from meals eaten hours ago!",
             "In some animals, burping is a social signal!",
             "Collecting burps could create a unique perfume scent!",
-            "Burping world records require official witnesses!",
             "Burping in different languages has onomatopoeic words!",
             "Burping in a vacuum would be silent but deadly!",
             "Burping apps exist to simulate sounds for pranks!",
@@ -869,7 +904,7 @@ async def help_command(interaction: discord.Interaction):
         
         embed.set_footer(text="Powered by BURP! 🚀 | Use /burp for instant burp sounds!")
         
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         logger.info(f"Help command used by {interaction.user.name}")
         
     except Exception as e:
@@ -883,6 +918,16 @@ async def help_command(interaction: discord.Interaction):
 async def stats_command(interaction: discord.Interaction):
     """Show Gas Streaks and Burp statistics - available to everyone"""
     try:
+        # Check cooldown (30 seconds)
+        can_use, time_left = check_cooldown(interaction.user.id, stats_cooldowns, 30)
+        if not can_use:
+            embed = discord.Embed(
+                title="⏰ Cooldown Active",
+                description=f"Please wait {time_left:.1f} more seconds before using `/stats` again!",
+                color=0xff9900
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
         # Defer response
         await interaction.response.defer()
         
