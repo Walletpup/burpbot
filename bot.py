@@ -691,31 +691,10 @@ async def burp_command(interaction: discord.Interaction):
         selected_burp = random.choice(burp_files)
         burp_filename = os.path.basename(selected_burp)
         
-        # Create success embed
-        embed = discord.Embed(
-            title="BURP ALERT",
-            description=f"**{interaction.user.display_name}** just burped!",
-            color=0x00ff6b
-        )
-        
-        embed.add_field(
-            name="🎵 Burp Sound",
-            value=f"`{burp_filename}`",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="💡 Want a burp fact?",
-            value="Use `/burpfact` to learn something new!",
-            inline=False
-        )
-        
-        embed.set_footer(text=f"🎵 Burp #{burp_filename.split('.')[0]} | Powered by BURP!")
-        
-        # Send the embed with the audio file as attachment
+        # Send just the audio file
         with open(selected_burp, 'rb') as audio_file:
             discord_file = discord.File(audio_file, filename=burp_filename)
-            await interaction.followup.send(embed=embed, file=discord_file)
+            await interaction.followup.send(file=discord_file)
         
         logger.info(f"Burp command used by {interaction.user.name} - posted {burp_filename}")
         
@@ -792,13 +771,10 @@ async def burpfact_command(interaction: discord.Interaction):
         
         # Create embed
         embed = discord.Embed(
-            title="💡 Burp Fact Time!",
+            title="Burp Fact",
             description=random_fact,
             color=0x00ff6b
-        )
-        
-        embed.set_footer(text=f"Burp Fact #{random.randint(1, len(burp_facts))} | Powered by BURP!")
-        
+        )        
         await interaction.response.send_message(embed=embed)
         logger.info(f"Burp fact command used by {interaction.user.name}")
         
