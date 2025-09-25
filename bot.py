@@ -643,7 +643,7 @@ class BurpBot:
             pool_name = pool_data.get('pool_name', 'Gas Streaks')
             
             embed = discord.Embed(
-                title=f"🆕 NEW POOL TYPE: {token_symbol}!",
+                title=f"NEW POOL TYPE: {token_symbol}",
                 description=f"A brand new {token_symbol} pool has been added to Gas Streaks!",
                 color=0x00ff00
             )
@@ -656,14 +656,8 @@ class BurpBot:
                 prize_formatted = pool_data.get('total_prize', 'N/A')
             
             embed.add_field(
-                name=f"🎯 {token_symbol} Pool Details",
-                value=f"```Starting Prize: {prize_formatted} {token_symbol}\nPool Name: {pool_name}\nStatus: 🟢 Active```",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="🎮 How to Play",
-                value="Visit [Gas Streaks](https://www.burpcoin.site/gas-streaks) to start playing!",
+                name=f"{token_symbol} Pool Details",
+                value=f"```Starting Prize: {prize_formatted} {token_symbol}\nPool Name: {pool_name}\nStatus: Active```",
                 inline=False
             )
             
@@ -1085,7 +1079,7 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
     """Show Gas Streaks statistics - available to everyone"""
     try:
         # Check cooldown (30 seconds)
-        can_use, time_left = check_cooldown(interaction.user.id, stats_cooldowns, 30)
+        can_use, time_left = check_cooldown(interaction.user.id, stats_cooldowns, 10)
         if not can_use:
             embed = discord.Embed(
                 title="⏰ Cooldown Active",
