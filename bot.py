@@ -252,19 +252,9 @@ class BurpBot:
     
     async def monitor_new_pool_types(self):
         """Background task to monitor for newly created pool types"""
-        known_pools = set()
-        
-        # Initialize with existing pools
-        try:
-            if self.db_pool:
-                async with self.db_pool.acquire() as conn:
-                    existing_pools = await conn.fetch(
-                        "SELECT pool_id FROM gas_admin_settings WHERE is_active = true"
-                    )
-                    known_pools = {pool['pool_id'] for pool in existing_pools}
-                    logger.info(f"Initialized monitoring with {len(known_pools)} existing pools")
-        except Exception as e:
-            logger.error(f"Error initializing pool monitoring: {e}")
+        # Track the last time we checked (start from bot startup time)
+        last_check_time = datetime.utcnow()
+        logger.info(f"Started new pool monitoring from: {last_check_time}")
         
         while True:
             try:
@@ -273,32 +263,36 @@ class BurpBot:
                     continue
                 
                 async with self.db_pool.acquire() as conn:
-                    # Check for any new pools
-                    current_pools = await conn.fetch(
+                    # Check for pools created since our last check
+                    new_pools = await conn.fetch(
                         """SELECT gas.pool_id, gas.pool_name, gas.prize_token_symbol, gas.created_at,
                                   gpp.total_amount
                            FROM gas_admin_settings gas
                            LEFT JOIN gas_streak_prize_pool gpp ON gas.pool_id = gpp.pool_id
-                           WHERE gas.is_active = true
-                           ORDER BY gas.created_at DESC"""
+                           WHERE gas.is_active = true 
+                           AND gas.created_at > $1
+                           ORDER BY gas.created_at ASC""",
+                        last_check_time
                     )
                     
-                    for pool in current_pools:
-                        pool_id = pool['pool_id']
+                    for pool in new_pools:
+                        pool_data = {
+                            'total_prize': str(int(float(pool['total_amount'] or 0))),
+                            'game_id': f"newpool-{pool['pool_id']}-{int(datetime.utcnow().timestamp())}",
+                            'pool_name': pool['pool_name'],
+                            'token_symbol': pool['prize_token_symbol'],
+                            'pool_id': pool['pool_id']
+                        }
                         
-                        # If this is a new pool we haven't seen before
-                        if pool_id not in known_pools:
-                            pool_data = {
-                                'total_prize': str(int(float(pool['total_amount'] or 0))),
-                                'game_id': f"newpool-{pool_id}-{int(datetime.utcnow().timestamp())}",
-                                'pool_name': pool['pool_name'],
-                                'token_symbol': pool['prize_token_symbol'],
-                                'pool_id': pool_id
-                            }
-                            
-                            logger.info(f"New pool type detected: {pool['prize_token_symbol']} - {pool['pool_name']}")
-                            await self.send_new_pool_type_announcement(pool_data)
-                            known_pools.add(pool_id)
+                        logger.info(f"NEW POOL DETECTED! {pool['prize_token_symbol']} - {pool['pool_name']} (created: {pool['created_at']})")
+                        await self.send_new_pool_type_announcement(pool_data)
+                        
+                        # Update our last check time to this pool's creation time
+                        last_check_time = pool['created_at']
+                
+                # Update last check time to now if no new pools found
+                if not new_pools:
+                    last_check_time = datetime.utcnow()
                 
                 # Check every 30 seconds for new pool types
                 await asyncio.sleep(30)
