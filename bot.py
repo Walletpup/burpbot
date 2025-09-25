@@ -1137,18 +1137,19 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
             color=0x00ff00
         )
         
-        # Overall Game Statistics
-        gas_stats = stats_data.get("gas_streaks", {})
-        embed.add_field(
-            name="Overall Game Stats",
-            value="```" +
-                  f"Active Pool Types: {gas_stats.get('active_pools', 'N/A')}\n" +
-                  f"Total Players: {gas_stats.get('total_players', 'N/A')}\n" +
-                  f"Games Completed: {gas_stats.get('games_completed', 'N/A')}\n" +
-                  f"Total Tokens Won: {gas_stats.get('total_tokens_won', 'N/A')}" +
-                  "```",
-            inline=True
-        )
+        # Overall Game Statistics (only show for all pools view)
+        if not pool:
+            gas_stats = stats_data.get("gas_streaks", {})
+            embed.add_field(
+                name="Overall Game Stats",
+                value="```" +
+                      f"Active Pool Types: {gas_stats.get('active_pools', 'N/A')}\n" +
+                      f"Total Players: {gas_stats.get('total_players', 'N/A')}\n" +
+                      f"Games Completed: {gas_stats.get('games_completed', 'N/A')}\n" +
+                      f"Total Tokens Won: {gas_stats.get('total_tokens_won', 'N/A')}" +
+                      "```",
+                inline=True
+            )
         
         # Active Pools Information - Enhanced Layout
         active_pools = stats_data.get("active_pools", [])
@@ -1194,15 +1195,28 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
         
         # Recent Activity with Token Info
         activity_stats = stats_data.get("recent_activity", {})
-        embed.add_field(
-            name="Recent Activity",
-            value="```" +
-                  f"Last Winner: {activity_stats.get('last_winner', 'N/A')}\n" +
-                  f"Last Game: {activity_stats.get('last_game', 'N/A')}\n" +
-                  f"Prize Won: {activity_stats.get('last_amount_won', 'N/A')}" +
-                  "```",
-            inline=False
-        )
+        if pool:
+            # For specific pool, show pool-specific activity or indicate it's pool-specific
+            embed.add_field(
+                name=f"Recent Activity - {pool.upper()} Pool",
+                value="```" +
+                      f"Last Winner: {activity_stats.get('last_winner', 'N/A')}\n" +
+                      f"Last Game: {activity_stats.get('last_game', 'N/A')}\n" +
+                      f"Prize Won: {activity_stats.get('last_amount_won', 'N/A')}" +
+                      "```",
+                inline=False
+            )
+        else:
+            # For all pools view, show overall recent activity
+            embed.add_field(
+                name="Recent Activity",
+                value="```" +
+                      f"Last Winner: {activity_stats.get('last_winner', 'N/A')}\n" +
+                      f"Last Game: {activity_stats.get('last_game', 'N/A')}\n" +
+                      f"Prize Won: {activity_stats.get('last_amount_won', 'N/A')}" +
+                      "```",
+                inline=False
+            )
         
         # No footer - removed as requested
         
