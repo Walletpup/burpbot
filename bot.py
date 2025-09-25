@@ -1197,21 +1197,9 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
                     inline=False
                 )
         
-        # Recent Activity with Token Info
-        activity_stats = stats_data.get("recent_activity", {})
-        if pool:
-            # For specific pool, show pool-specific activity or indicate it's pool-specific
-            embed.add_field(
-                name=f"Recent Activity - {pool.upper()} Pool",
-                value="```" +
-                      f"Last Winner: {activity_stats.get('last_winner', 'N/A')}\n" +
-                      f"Last Game: {activity_stats.get('last_game', 'N/A')}\n" +
-                      f"Prize Won: {activity_stats.get('last_amount_won', 'N/A')}" +
-                      "```",
-                inline=False
-            )
-        else:
-            # For all pools view, show overall recent activity
+        # Recent Activity with Token Info (only for all pools view)
+        if not pool:
+            activity_stats = stats_data.get("recent_activity", {})
             embed.add_field(
                 name="Recent Activity",
                 value="```" +
