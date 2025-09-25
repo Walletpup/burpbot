@@ -1128,7 +1128,7 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
             embed_title = f"Gas Streaks Statistics - {pool.upper()} Pool"
             embed_description = f"Detailed statistics for the {pool.upper()} pool"
         else:
-            embed_title = "🎯 Gas Streaks Multi-Pool Statistics"
+            embed_title = "Gas Streaks Multi-Pool Statistics"
             embed_description = "Complete overview of all active token pools"
         
         embed = discord.Embed(
@@ -1140,7 +1140,7 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
         # Overall Game Statistics
         gas_stats = stats_data.get("gas_streaks", {})
         embed.add_field(
-            name="🎮 Overall Game Stats",
+            name="Overall Game Stats",
             value="```" +
                   f"Active Pool Types: {gas_stats.get('active_pools', 'N/A')}\n" +
                   f"Total Players: {gas_stats.get('total_players', 'N/A')}\n" +
@@ -1161,20 +1161,10 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
                 pool_amount = int(pool_data['total_amount']) if pool_data['total_amount'] else 0
                 total_pool_value += pool_amount
                 
-                # Format with emoji indicators for pool size
-                if pool_amount > 10000:
-                    size_indicator = "🔥"  # Hot pool
-                elif pool_amount > 1000:
-                    size_indicator = "💎"  # Good pool
-                elif pool_amount > 100:
-                    size_indicator = "⭐"  # Active pool
-                else:
-                    size_indicator = "🌱"  # Growing pool
-                
-                pool_info_lines.append(f"{size_indicator} {pool_data['prize_token_symbol']}: {pool_amount:,}")
+                pool_info_lines.append(f"{pool_data['prize_token_symbol']}: {pool_amount:,}")
             
             embed.add_field(
-                name="💰 Active Token Pools",
+                name="Active Token Pools",
                 value="```" + "\n".join(pool_info_lines) + f"\n\nTotal Pool Value: {total_pool_value:,} Tokens" + "```",
                 inline=True
             )
@@ -1182,7 +1172,7 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
             # Token Diversity Stats
             unique_tokens = len(set(p['prize_token_symbol'] for p in active_pools))
             embed.add_field(
-                name="🏆 Pool Diversity",
+                name="Pool Diversity",
                 value="```" +
                       f"Unique Tokens: {unique_tokens}\n" +
                       f"Largest Pool: {max((int(p['total_amount']) for p in active_pools), default=0):,}\n" +
@@ -1197,15 +1187,15 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
             if pool_data:
                 pool_amount = f"{int(pool_data['total_amount']):,}" if pool_data['total_amount'] else "0"
                 embed.add_field(
-                    name=f"💰 {pool_data['pool_name']} Details",
-                    value=f"```Prize Pool: {pool_amount} {pool_data['prize_token_symbol']}\nPool ID: {pool_data['pool_id']}\nStatus: {'🟢 Active' if pool_data['is_active'] else '🔴 Inactive'}```",
+                    name=f"{pool_data['pool_name']} Details",
+                    value=f"```Prize Pool: {pool_amount} {pool_data['prize_token_symbol']}\nPool ID: {pool_data['pool_id']}\nStatus: {'Active' if pool_data['is_active'] else 'Inactive'}```",
                     inline=False
                 )
         
         # Recent Activity with Token Info
         activity_stats = stats_data.get("recent_activity", {})
         embed.add_field(
-            name="⏰ Recent Activity",
+            name="Recent Activity",
             value="```" +
                   f"Last Winner: {activity_stats.get('last_winner', 'N/A')}\n" +
                   f"Last Game: {activity_stats.get('last_game', 'N/A')}\n" +
@@ -1214,15 +1204,7 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
             inline=False
         )
         
-        # Enhanced footer with pool info
-        if not pool and active_pools:
-            pool_names = [p['prize_token_symbol'] for p in active_pools]
-            embed.set_footer(
-                text=f"🎯 {len(active_pools)} Active Pools: {', '.join(pool_names)} | Use /stats <token> for details",
-                icon_url="https://www.burpcoin.site/favicon.ico"
-            )
-        elif pool:
-            embed.set_footer(text="💡 Use /stats to see all pools overview")
+        # No footer - removed as requested
         
         # Send the stats embed
         await interaction.followup.send(embed=embed)
