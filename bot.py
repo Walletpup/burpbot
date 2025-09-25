@@ -5,7 +5,7 @@ import random
 import string
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 from typing import Optional
 import re
@@ -116,8 +116,8 @@ class BurpBot:
         
         # Start the monitoring tasks
         self.monitoring_task = asyncio.create_task(self.monitor_winners())
-        self.pool_monitoring_task = asyncio.create_task(self.monitor_new_games())
-        logger.info("Started database monitoring for new winners and prize pool changes")
+        self.pool_monitoring_task = asyncio.create_task(self.monitor_new_pool_types())
+        logger.info("Started database monitoring for new winners and new pool types")
     
     async def init_last_winner_id(self):
         """Initialize the last checked winner ID to avoid duplicate notifications"""
@@ -210,40 +210,61 @@ class BurpBot:
         except Exception as e:
             logger.error(f"Error processing new winner: {e}")
     
-    async def check_and_announce_new_prize_pool(self):
-        """Check current prize pools and announce if they're substantial"""
+    async def check_for_new_pool_types(self):
+        """Monitor for newly created pool types (not prize pool resets)"""
         try:
             if not self.db_pool:
                 return
             
             async with self.db_pool.acquire() as conn:
-                # Get all active prize pools
-                active_pools = await conn.fetch(
-                    """SELECT gpp.pool_id, gpp.total_amount, gas.pool_name, gas.prize_token_symbol
-                       FROM gas_streak_prize_pool gpp
-                       JOIN gas_admin_settings gas ON gpp.pool_id = gas.pool_id
-                       WHERE gas.is_active = true AND gpp.total_amount > 100
-                       ORDER BY gas.pool_order"""
+                # Get all active pools
+                current_pools = await conn.fetch(
+                    """SELECT pool_id, pool_name, prize_token_symbol, created_at
+                       FROM gas_admin_settings 
+                       WHERE is_active = true
+                       ORDER BY created_at DESC"""
                 )
                 
-                for pool in active_pools:
-                    pool_data = {
-                        'total_prize': str(int(float(pool['total_amount']))),
-                        'game_id': f"pool-{pool['pool_id']}-{int(datetime.utcnow().timestamp())}",
-                        'pool_name': pool['pool_name'],
-                        'token_symbol': pool['prize_token_symbol'],
-                        'pool_id': pool['pool_id']
-                    }
-                    
-                    logger.info(f"Announcing new prize pool: {pool_data['total_prize']} {pool['prize_token_symbol']} in {pool['pool_name']}")
-                    await self.send_new_prize_pool_announcement(pool_data)
+                # Check if any pools were created in the last 5 minutes (new pool detection)
+                recent_threshold = datetime.utcnow() - timedelta(minutes=5)
+                
+                for pool in current_pools:
+                    if pool['created_at'] > recent_threshold:
+                        # This is a newly created pool type
+                        pool_prize = await conn.fetchval(
+                            "SELECT total_amount FROM gas_streak_prize_pool WHERE pool_id = $1",
+                            pool['pool_id']
+                        )
+                        
+                        pool_data = {
+                            'total_prize': str(int(float(pool_prize or 0))),
+                            'game_id': f"newpool-{pool['pool_id']}-{int(datetime.utcnow().timestamp())}",
+                            'pool_name': pool['pool_name'],
+                            'token_symbol': pool['prize_token_symbol'],
+                            'pool_id': pool['pool_id']
+                        }
+                        
+                        logger.info(f"New pool type detected: {pool['prize_token_symbol']} - {pool['pool_name']}")
+                        await self.send_new_pool_type_announcement(pool_data)
                     
         except Exception as e:
-            logger.error(f"Error checking prize pools: {e}")
+            logger.error(f"Error checking for new pool types: {e}")
     
-    async def monitor_new_games(self):
-        """Background task to monitor for prize pool changes across all pools"""
-        last_pool_amounts = {}
+    async def monitor_new_pool_types(self):
+        """Background task to monitor for newly created pool types"""
+        known_pools = set()
+        
+        # Initialize with existing pools
+        try:
+            if self.db_pool:
+                async with self.db_pool.acquire() as conn:
+                    existing_pools = await conn.fetch(
+                        "SELECT pool_id FROM gas_admin_settings WHERE is_active = true"
+                    )
+                    known_pools = {pool['pool_id'] for pool in existing_pools}
+                    logger.info(f"Initialized monitoring with {len(known_pools)} existing pools")
+        except Exception as e:
+            logger.error(f"Error initializing pool monitoring: {e}")
         
         while True:
             try:
@@ -252,40 +273,38 @@ class BurpBot:
                     continue
                 
                 async with self.db_pool.acquire() as conn:
-                    # Check all active prize pools
+                    # Check for any new pools
                     current_pools = await conn.fetch(
-                        """SELECT gpp.pool_id, gpp.total_amount, gas.pool_name, gas.prize_token_symbol
-                           FROM gas_streak_prize_pool gpp
-                           JOIN gas_admin_settings gas ON gpp.pool_id = gas.pool_id
+                        """SELECT gas.pool_id, gas.pool_name, gas.prize_token_symbol, gas.created_at,
+                                  gpp.total_amount
+                           FROM gas_admin_settings gas
+                           LEFT JOIN gas_streak_prize_pool gpp ON gas.pool_id = gpp.pool_id
                            WHERE gas.is_active = true
-                           ORDER BY gas.pool_order"""
+                           ORDER BY gas.created_at DESC"""
                     )
                     
                     for pool in current_pools:
                         pool_id = pool['pool_id']
-                        current_amount = int(float(pool['total_amount']))
-                        last_amount = last_pool_amounts.get(pool_id)
                         
-                        # If prize pool increased significantly (new contributions)
-                        if last_amount is not None and current_amount > last_amount + 50:  # 50+ token increase
+                        # If this is a new pool we haven't seen before
+                        if pool_id not in known_pools:
                             pool_data = {
-                                'total_prize': f"{current_amount:,}",
-                                'game_id': f"game-{pool_id}-{int(datetime.utcnow().timestamp())}",
+                                'total_prize': str(int(float(pool['total_amount'] or 0))),
+                                'game_id': f"newpool-{pool_id}-{int(datetime.utcnow().timestamp())}",
                                 'pool_name': pool['pool_name'],
                                 'token_symbol': pool['prize_token_symbol'],
                                 'pool_id': pool_id
                             }
                             
-                            logger.info(f"Prize pool increased to {current_amount:,} {pool['prize_token_symbol']} in {pool['pool_name']}")
-                            await self.send_new_prize_pool_announcement(pool_data)
-                        
-                        last_pool_amounts[pool_id] = current_amount
+                            logger.info(f"New pool type detected: {pool['prize_token_symbol']} - {pool['pool_name']}")
+                            await self.send_new_pool_type_announcement(pool_data)
+                            known_pools.add(pool_id)
                 
-                # Check every 2 minutes for prize pool changes
-                await asyncio.sleep(120)
+                # Check every 30 seconds for new pool types
+                await asyncio.sleep(30)
                 
             except Exception as e:
-                logger.error(f"Error in prize pool monitoring: {e}")
+                logger.error(f"Error in new pool type monitoring: {e}")
                 await asyncio.sleep(60)  # Wait longer on error
     
     async def fetch_gas_streaks_stats(self, pool_id=None):
@@ -614,13 +633,10 @@ class BurpBot:
             await channel.send(embed=embed)
             logger.info(f"Sent {token_symbol} winner announcement for {winner_address} in {pool_name}")
             
-            # After announcing winner, check if we should announce new prize pool
-            await self.check_and_announce_new_prize_pool()
-            
         except Exception as e:
             logger.error(f"Error sending winner announcement: {e}")
     
-    async def send_new_prize_pool_announcement(self, pool_data):
+    async def send_new_pool_type_announcement(self, pool_data):
         """Send new prize pool announcement"""
         try:
             channel = self.bot.get_channel(NEW_PRIZE_POOLS_CHANNEL)
@@ -633,8 +649,8 @@ class BurpBot:
             pool_name = pool_data.get('pool_name', 'Gas Streaks')
             
             embed = discord.Embed(
-                title=f"NEW {pool_name.upper()} POOL AVAILABLE!",
-                description=f"A fresh {token_symbol} prize pool is ready for Gas Streaks!",
+                title=f"🆕 NEW POOL TYPE: {token_symbol}!",
+                description=f"A brand new {token_symbol} pool has been added to Gas Streaks!",
                 color=0x00ff00
             )
             
@@ -646,22 +662,22 @@ class BurpBot:
                 prize_formatted = pool_data.get('total_prize', 'N/A')
             
             embed.add_field(
-                name=f"{token_symbol} Prize Pool",
-                value=f"```{prize_formatted} {token_symbol}```",
-                inline=True
+                name=f"🎯 {token_symbol} Pool Details",
+                value=f"```Starting Prize: {prize_formatted} {token_symbol}\nPool Name: {pool_name}\nStatus: 🟢 Active```",
+                inline=False
             )
             
             embed.add_field(
-                name="Pool Type",
-                value=f"```{pool_name}```",
-                inline=True
+                name="🎮 How to Play",
+                value="Visit [Gas Streaks](https://www.burpcoin.site/gas-streaks) to start playing!",
+                inline=False
             )
             
             await channel.send(embed=embed)
-            logger.info(f"Sent new prize pool announcement: {prize_formatted} {token_symbol} in {pool_name}")
+            logger.info(f"Sent new pool type announcement: {token_symbol} - {pool_name}")
             
         except Exception as e:
-            logger.error(f"Error sending prize pool announcement: {e}")
+            logger.error(f"Error sending new pool type announcement: {e}")
 
 # Initialize bot helper
 burp_bot = BurpBot(bot)
@@ -1155,7 +1171,7 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
                 else:
                     size_indicator = "🌱"  # Growing pool
                 
-                pool_info_lines.append(f"{size_indicator} {pool_data['token_symbol']}: {pool_amount:,}")
+                pool_info_lines.append(f"{size_indicator} {pool_data['prize_token_symbol']}: {pool_amount:,}")
             
             embed.add_field(
                 name="💰 Active Token Pools",
@@ -1164,7 +1180,7 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
             )
             
             # Token Diversity Stats
-            unique_tokens = len(set(p['token_symbol'] for p in active_pools))
+            unique_tokens = len(set(p['prize_token_symbol'] for p in active_pools))
             embed.add_field(
                 name="🏆 Pool Diversity",
                 value="```" +
@@ -1177,12 +1193,12 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
             
         elif pool and active_pools:
             # Show specific pool details
-            pool_data = next((p for p in active_pools if p['pool_id'].lower() == pool.lower() or p['token_symbol'].lower() == pool.lower()), None)
+            pool_data = next((p for p in active_pools if p['pool_id'].lower() == pool.lower() or p['prize_token_symbol'].lower() == pool.lower()), None)
             if pool_data:
                 pool_amount = f"{int(pool_data['total_amount']):,}" if pool_data['total_amount'] else "0"
                 embed.add_field(
                     name=f"💰 {pool_data['pool_name']} Details",
-                    value=f"```Prize Pool: {pool_amount} {pool_data['token_symbol']}\nPool ID: {pool_data['pool_id']}\nStatus: {'🟢 Active' if pool_data['is_active'] else '🔴 Inactive'}```",
+                    value=f"```Prize Pool: {pool_amount} {pool_data['prize_token_symbol']}\nPool ID: {pool_data['pool_id']}\nStatus: {'🟢 Active' if pool_data['is_active'] else '🔴 Inactive'}```",
                     inline=False
                 )
         
@@ -1200,7 +1216,7 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
         
         # Enhanced footer with pool info
         if not pool and active_pools:
-            pool_names = [p['token_symbol'] for p in active_pools]
+            pool_names = [p['prize_token_symbol'] for p in active_pools]
             embed.set_footer(
                 text=f"🎯 {len(active_pools)} Active Pools: {', '.join(pool_names)} | Use /stats <token> for details",
                 icon_url="https://www.burpcoin.site/favicon.ico"
