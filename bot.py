@@ -749,7 +749,7 @@ async def on_member_join(member):
         
         embed = discord.Embed(
             title="Welcome!",
-            description=f"Hey mmhmmphff {member.mention}! Welcome to the **Burp** community!",
+            description=f"Hey mmhmmphff {member.mention}!",
             color=0x00ff00
         )
         
