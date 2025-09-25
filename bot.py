@@ -380,18 +380,34 @@ class BurpBot:
                         "SELECT COALESCE(SUM(burp_amount), 0) FROM gas_streaks"
                     )
                 
-                # Get recent winner info (pool-specific or all)
+                # Get recent winner info (pool-specific or all) - prioritize prize pool table data
                 if pool_id:
+                    # First try to get from prize pool table (more reliable)
                     recent_winner = await conn.fetchrow(
-                        """SELECT gs.wallet_address, gs.prize_amount, gs.created_at, gs.transaction_hash, gs.pool_id,
-                                  gas.prize_token_symbol
-                           FROM gas_streaks gs
-                           LEFT JOIN gas_admin_settings gas ON gs.pool_id = gas.pool_id
-                           WHERE gs.won = true AND gs.pool_id = $1
-                           ORDER BY gs.created_at DESC 
-                           LIMIT 1""", pool_id
+                        """SELECT gpp.last_winner_address as wallet_address, 
+                                  gpp.last_win_amount as prize_amount, 
+                                  gpp.last_win_date as created_at,
+                                  gas.prize_token_symbol,
+                                  gpp.pool_id
+                           FROM gas_streak_prize_pool gpp
+                           LEFT JOIN gas_admin_settings gas ON gpp.pool_id = gas.pool_id
+                           WHERE gpp.pool_id = $1 
+                           AND gpp.last_winner_address IS NOT NULL""", pool_id
                     )
+                    
+                    # If no data in prize pool table, fallback to gas_streaks table
+                    if not recent_winner:
+                        recent_winner = await conn.fetchrow(
+                            """SELECT gs.wallet_address, gs.prize_amount, gs.created_at, gs.transaction_hash, gs.pool_id,
+                                      gas.prize_token_symbol
+                               FROM gas_streaks gs
+                               LEFT JOIN gas_admin_settings gas ON gs.pool_id = gas.pool_id
+                               WHERE gs.won = true AND gs.pool_id = $1
+                               ORDER BY gs.created_at DESC 
+                               LIMIT 1""", pool_id
+                        )
                 else:
+                    # For all pools, get the most recent winner from either table
                     recent_winner = await conn.fetchrow(
                         """SELECT gs.wallet_address, gs.prize_amount, gs.created_at, gs.transaction_hash, gs.pool_id,
                                   gas.prize_token_symbol
