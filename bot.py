@@ -1134,7 +1134,7 @@ class StatsView(discord.ui.View):
             return
         
         embed = discord.Embed(
-            title="📊 Overall Platform Statistics",
+            title="Overall Platform Statistics",
             description="Combined statistics across all games",
             color=0x00ff00
         )
@@ -1148,37 +1148,37 @@ class StatsView(discord.ui.View):
             pass
         
         embed.add_field(
-            name="👥 Total Users",
+            name="Total Users",
             value=f"```{stats['total_users']:,}```",
             inline=True
         )
         
         embed.add_field(
-            name="🎮 Total Plays",
+            name="Total Plays",
             value=f"```{stats['total_games']:,}```",
             inline=True
         )
         
         embed.add_field(
-            name="🏆 Total Winnings",
+            name="Total Winnings",
             value=f"```{stats['total_winnings']:,} BURP```",
             inline=True
         )
         
         embed.add_field(
-            name="🎮 Gas Streaks",
+            name="Gas Streaks",
             value=f"```Players: {stats['gas_users']:,}\nGames: {stats['gas_games']:,}\nWinnings: {stats['gas_winnings']:,}```",
             inline=True
         )
         
         embed.add_field(
-            name="🎰 Burp Slots",
+            name="Burp Slots",
             value=f"```Players: {stats['slots_users']:,}\nSpins: {stats['slots_games']:,}\nWinnings: {stats['slots_winnings']:,}```",
             inline=True
         )
         
         embed.add_field(
-            name="💰 Total Payments",
+            name="Total Payments",
             value=f"```{stats['total_payments']:,} BURP```",
             inline=True
         )
@@ -1199,7 +1199,7 @@ class StatsView(discord.ui.View):
             return
         
         embed = discord.Embed(
-            title="⚡ Gas Streaks Statistics",
+            title="Gas Streaks Statistics",
             description="Complete Gas Streaks game statistics",
             color=0x00ff00
         )
@@ -1213,25 +1213,25 @@ class StatsView(discord.ui.View):
             pass
         
         embed.add_field(
-            name="👥 Total Players",
+            name="Total Players",
             value=f"```{stats['total_players']:,}```",
             inline=True
         )
         
         embed.add_field(
-            name="🎮 Total Streaks",
+            name="Total Streaks",
             value=f"```{stats['total_streaks']:,}```",
             inline=True
         )
         
         embed.add_field(
-            name="🏆 Total Winners",
+            name="Total Winners",
             value=f"```{stats['total_winners']:,}```",
             inline=True
         )
         
         embed.add_field(
-            name="💰 Total Tokens Won",
+            name="Total Tokens Won",
             value=f"```{stats['total_tokens_won']:,}```",
             inline=True
         )
@@ -1244,7 +1244,7 @@ class StatsView(discord.ui.View):
                 pool_lines.append(f"{pool['prize_token_symbol']}: {amount:,}")
             
             embed.add_field(
-                name="🎯 Active Pools",
+                name="Active Pools",
                 value="```" + "\n".join(pool_lines) + "```",
                 inline=True
             )
@@ -1255,7 +1255,7 @@ class StatsView(discord.ui.View):
             addr = win['wallet_address']
             truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
             embed.add_field(
-                name="💎 Biggest Win",
+                name="Biggest Win",
                 value=f"```{int(win['prize_amount']):,} {win['prize_token_symbol']}\n{truncated}```",
                 inline=True
             )
@@ -1266,7 +1266,7 @@ class StatsView(discord.ui.View):
             addr = win['wallet_address']
             truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
             embed.add_field(
-                name="🕐 Recent Winner",
+                name="Recent Winner",
                 value=f"```{int(win['prize_amount']):,} {win['prize_token_symbol']}\n{truncated}\n{stats['last_winner_time']}```",
                 inline=False
             )
@@ -1289,7 +1289,7 @@ class StatsView(discord.ui.View):
             return
         
         embed = discord.Embed(
-            title="🎰 Burp Slots Statistics",
+            title="Burp Slots Statistics",
             description="Complete Burp Slots game statistics",
             color=0xff0000
         )
@@ -1303,31 +1303,31 @@ class StatsView(discord.ui.View):
             pass
         
         embed.add_field(
-            name="👥 Total Players",
+            name="Total Players",
             value=f"```{stats['total_players']:,}```",
             inline=True
         )
         
         embed.add_field(
-            name="🎰 Total Spins",
+            name="Total Spins",
             value=f"```{stats['total_spins']:,}```",
             inline=True
         )
         
         embed.add_field(
-            name="💎 Total Jackpots",
+            name="Total Jackpots",
             value=f"```{stats['total_jackpots']:,}```",
             inline=True
         )
         
         embed.add_field(
-            name="💰 Total Wagered",
+            name="Total Wagered",
             value=f"```{stats['total_wagered']:,} BURP```",
             inline=True
         )
         
         embed.add_field(
-            name="🏆 Total Won",
+            name="Total Won",
             value=f"```{stats['total_won']:,} BURP```",
             inline=True
         )
@@ -1335,7 +1335,7 @@ class StatsView(discord.ui.View):
         # Calculate RTP
         rtp = (stats['total_won'] / stats['total_wagered'] * 100) if stats['total_wagered'] > 0 else 0
         embed.add_field(
-            name="📊 RTP",
+            name="RTP",
             value=f"```{rtp:.2f}%```",
             inline=True
         )
@@ -1346,7 +1346,7 @@ class StatsView(discord.ui.View):
             addr = jp['wallet_address']
             truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
             embed.add_field(
-                name="💎 Biggest Jackpot",
+                name="Biggest Jackpot",
                 value=f"```{int(jp['payout']):,} BURP\n{jp['multiplier']}x Multiplier\n{truncated}```",
                 inline=True
             )
@@ -1358,7 +1358,7 @@ class StatsView(discord.ui.View):
             truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
             multiplier = win['payout'] / win['bet_amount'] if win['bet_amount'] > 0 else 0
             embed.add_field(
-                name="🏆 Biggest Win",
+                name="Biggest Win",
                 value=f"```{int(win['payout']):,} BURP\n{multiplier:.1f}x Multiplier\n{truncated}```",
                 inline=True
             )
@@ -1369,7 +1369,7 @@ class StatsView(discord.ui.View):
             addr = win['wallet_address']
             truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
             embed.add_field(
-                name="🕐 Recent Big Win (24h)",
+                name="Recent Big Win (24h)",
                 value=f"```{int(win['payout']):,} BURP\n{truncated}```",
                 inline=True
             )
@@ -1404,25 +1404,25 @@ class GasStreaksPoolView(discord.ui.View):
         # Return to main stats view
         view = StatsView(self.user_id)
         embed = discord.Embed(
-            title="📊 Burp Statistics Dashboard",
+            title="Burp Statistics Dashboard",
             description="Select a category to view detailed statistics",
             color=0x00ff6b
         )
         
         embed.add_field(
-            name="📊 Overall Stats",
+            name="Overall Stats",
             value="View combined statistics across all games",
             inline=False
         )
         
         embed.add_field(
-            name="⚡ Gas Streaks",
+            name="Gas Streaks",
             value="Detailed Gas Streaks game statistics and pool information",
             inline=False
         )
         
         embed.add_field(
-            name="🎰 Burp Slots",
+            name="Burp Slots",
             value="Complete Burp Slots statistics, jackpots, and big wins",
             inline=False
         )
@@ -1459,7 +1459,7 @@ class GasStreaksPoolView(discord.ui.View):
         token = pool_info['prize_token_symbol']
         
         embed = discord.Embed(
-            title=f"⚡ {token} Pool Statistics",
+            title=f"{token} Pool Statistics",
             description=f"Detailed statistics for {pool_info['pool_name']}",
             color=0x00ff00
         )
@@ -1473,25 +1473,25 @@ class GasStreaksPoolView(discord.ui.View):
             pass
         
         embed.add_field(
-            name="💰 Current Prize Pool",
+            name="Current Prize Pool",
             value=f"```{int(pool_info['total_amount'] or 0):,} {token}```",
             inline=True
         )
         
         embed.add_field(
-            name="🎮 Total Streaks",
+            name="Total Streaks",
             value=f"```{stats['total_streaks']:,}```",
             inline=True
         )
         
         embed.add_field(
-            name="🏆 Total Winners",
+            name="Total Winners",
             value=f"```{stats['total_winners']:,}```",
             inline=True
         )
         
         embed.add_field(
-            name="💎 Total Won",
+            name="Total Won",
             value=f"```{stats['total_tokens_won']:,} {token}```",
             inline=True
         )
@@ -1499,7 +1499,7 @@ class GasStreaksPoolView(discord.ui.View):
         # Win rate
         win_rate = (stats['total_winners'] / stats['total_streaks'] * 100) if stats['total_streaks'] > 0 else 0
         embed.add_field(
-            name="📊 Win Rate",
+            name="Win Rate",
             value=f"```{win_rate:.2f}%```",
             inline=True
         )
@@ -1510,7 +1510,7 @@ class GasStreaksPoolView(discord.ui.View):
             addr = win['wallet_address']
             truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
             embed.add_field(
-                name="💎 Biggest Win",
+                name="Biggest Win",
                 value=f"```{int(win['prize_amount']):,} {token}\n{truncated}```",
                 inline=True
             )
@@ -1521,7 +1521,7 @@ class GasStreaksPoolView(discord.ui.View):
             addr = win['wallet_address']
             truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
             embed.add_field(
-                name="🕐 Recent Winner",
+                name="Recent Winner",
                 value=f"```{int(win['prize_amount']):,} {token}\n{truncated}\n{stats['last_winner_time']}```",
                 inline=False
             )
