@@ -832,10 +832,10 @@ async def burp_command(interaction: discord.Interaction):
     """Fun command that posts actual burp sound files"""
     try:
         # Check cooldown (10 seconds)
-        can_use, time_left = check_cooldown(interaction.user.id, burp_cooldowns, 10)
+        can_use, time_left = check_cooldown(interaction.user.id, burp_cooldowns, 5)
         if not can_use:
             embed = discord.Embed(
-                title="⏰ Cooldown Active",
+                title="Cooldown Active",
                 description=f"Please wait {time_left:.1f} more seconds before using `/burp` again!",
                 color=0xff9900
             )
@@ -890,79 +890,40 @@ async def burpfact_command(interaction: discord.Interaction):
         can_use, time_left = check_cooldown(interaction.user.id, burpfact_cooldowns, 5)
         if not can_use:
             embed = discord.Embed(
-                title="⏰ Cooldown Active",
+                title="Cooldown Active",
                 description=f"Please wait {time_left:.1f} more seconds before using `/burpfact` again!",
                 color=0xff9900
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
-        # Curated list of interesting burp facts (removed obvious ones)
+        # Curated list of interesting burp facts
         burp_facts = [
-            "Did you know? The average person burps 14 times a day!",
-            "Fun fact: Burps can travel up to 10 mph!",
-            "Burp trivia: The longest recorded burp lasted 2 minutes 42 seconds!",
-            "Did you know? Burping is called 'eructation' in medical terms!",
-            "Fun fact: Cows burp about 300-500 liters of methane per day!",
-            "Burp science: It's mostly nitrogen and carbon dioxide!",
-            "Did you know? In some cultures, burping after a meal is a compliment!",
-            "Fun fact: Babies need to burp because they swallow air while feeding!",
-            "Burp trivia: The sound comes from vibrations in your esophagus!",
-            "Did you know? Carbonated drinks make you burp more!",
-            "Fun fact: Fish can't burp because they don't have stomachs!",
-            "Burp science: Your stomach can hold up to 4 liters of gas!",
-            "Did you know? Astronauts can't burp in space due to zero gravity!",
-            "Fun fact: The word 'burp' was first used in 1932!",
-            "Burp trivia: Some people can burp on command by swallowing air!",
-            "Did you know? Burping releases pressure that could otherwise cause pain!",
-            "Fun fact: Dogs and cats can burp too, but rarely do!",
-            "Burp science: Helium makes your burps sound higher pitched!",
-            "Did you know? Newborns burp more than adults because they swallow more air!",
-            "Fun fact: The loudest burp ever recorded was 109.9 decibels!",
-            "Burp trivia: Chewing gum makes you swallow more air and burp more!",
-            "Did you know? Burping after drinking milk is more common due to lactose!",
-            "Fun fact: Some birds can burp, but most cannot!",
-            "Burp science: Eating too fast increases burping by 300%!",
-            "Did you know? Burps smell because of hydrogen sulfide gas!",
-            "Fun fact: The ancient Romans considered burping a sign of appreciation!",
-            "Burp trivia: Drinking through straws increases air intake and burping!",
-            "Did you know? Burping can actually help prevent bloating and discomfort!",
-            "Fun fact: Pregnant women burp more due to hormonal changes!",
-            "Burp science: Cold drinks cause more burping than warm ones!",
-            "Did you know? Professional burpers exist and perform at events!",
-            "Fun fact: Burping competitions are held worldwide!",
-            "Burp trivia: The scientific term for excessive burping is 'aerophagia'!",
-            "Did you know? Burps can contain up to 59% nitrogen!",
-            "Fun fact: Eating beans increases burping due to complex sugars!",
-            "Burp science: Lying down after eating reduces burping!",
-            "Did you know? Some medications can increase or decrease burping!",
-            "Fun fact: Burping is one of the first sounds babies learn to control!",
-            "Burp trivia: The Guinness World Record for burping is highly contested!",
-            "Did you know? Burping helps prevent acid reflux in many people!",
-            "Fun fact: Different foods create different burp sounds and smells!",
-            "Burp science: Burping frequency decreases as you age!",
-            "Did you know? Some cultures have specific etiquette rules about burping!",
-            "Fun fact: Burping can be a sign of a healthy digestive system!",
-            "Burp trivia: The average burp lasts 2.5 seconds!",
-            "Did you know? Burping while talking can change your voice pitch!",
-            "Fun fact: Some people can burp the alphabet!",
-            "Burp science: Burping releases about 0.5 liters of gas on average!",
-            "Did you know? Burping competitions have judges who rate volume and duration!",
-            "Fun fact: The fear of burping in public is called 'aerophobia'!"
-            "The longest recorded burp lasted 2 minutes 42 seconds!",
-            "Burping is called 'eructation' in medical terms!",
-            "Cows burp about 300-500 liters of methane per day!",
-            "Fish can't burp because they don't have stomachs!",
-            "Your stomach can hold up to 4 liters of gas!",
-            "Astronauts can't burp in space due to zero gravity!",
-            "The word 'burp' was first used in 1932!",
+            "The average person burps 14 times a day!",
+            "Burps can travel up to 10 mph!",
+            "The longest burp is 1 minute 13 seconds 57 milliseconds by Michele Forgione in Italy!",
+            "The loudest burp ever recorded was 109.9 decibels!",
             "The loudest burp by a male is 112.4 decibels, achieved by Neville Sharp in Australia!",
             "The loudest burp by a female is 107.3 decibels, by Kimberly Winter in the USA!",
-            "The longest burp is 1 minute 13 seconds 57 milliseconds by Michele Forgione in Italy!",
+            "Burping is called 'eructation' in medical terms!",
+            "Cows burp about 300-500 liters of methane per day!",
+            "Your stomach can hold up to 4 liters of gas!",
+            "Fish can't burp because they don't have stomachs!",
+            "Astronauts can't burp in space due to zero gravity!",
+            "The word 'burp' was first used in 1932!",
+            "The sound comes from vibrations in your esophagus!",
+            "Helium makes your burps sound higher pitched!",
+            "Eating too fast increases burping by 300%!",
+            "The ancient Romans considered burping a sign of appreciation!",
+            "Burping competitions are held worldwide!",
+            "The scientific term for excessive burping is 'aerophagia'!",
+            "Burps can contain up to 59% nitrogen!",
+            "The average burp lasts 2.5 seconds!",
+            "The fear of burping in public is called 'aerophobia'!",
             "Some Guinness records include burping while balancing objects, like a book on the head!",
             "The sound for Booger's epic burp in 'Revenge of the Nerds' was a mix of a camel's orgasm and a human burp!",
             "Gorillas burp when happy, producing a deep rumbling sound to show contentment!",
             "Horses cannot burp, which can lead to serious digestive issues like colic if gas builds up!",
-            "In space, attempting to burp often results in a 'wet burp' or vomit due to lack of gravity separating liquids and gases!",
+            "In space, attempting to burp often results in a 'wet burp' or vomit due to lack of gravity!",
             "Astronauts use a 'push and burp' technique by shoving off walls to simulate gravity for burping!",
             "Vomiting in a spacesuit can cause it to ricochet back, a real hazard for astronauts!",
             "In zero gravity, more gas ends up as farts since it can't be easily burped out!",
@@ -971,14 +932,10 @@ async def burpfact_command(interaction: discord.Interaction):
             "In China, burping after a meal is a polite way to compliment the chef's cooking!",
             "In Turkey and India, burping signifies you've enjoyed your meal and is socially acceptable!",
             "In some Inuit cultures, even farting after eating shows enjoyment of the food!",
-            "The scientific term for excessive burping is 'aerophagia'!",
-            "Burps can contain up to 59% nitrogen!",
-            "The fear of burping in public is called 'aerophobia'!",
             "In burping competitions, entries are judged on volume, duration, and sometimes artistic merit!",
             "Belching disorders can lead to anxiety and social discomfort for sufferers!",
             "The unpleasant smell in some burps comes from trace hydrogen sulfide gas!",
             "The human stomach can accumulate up to 4 liters of gas before discomfort sets in!",
-            "Eructation is the formal medical name for the act of burping!",
             "A single cow burps methane every 40 seconds on average!",
             "Cows produce up to 220 pounds of methane annually, mostly via burps!",
             "Sheep, goats, and buffalo also burp methane as part of rumination!",
@@ -1004,25 +961,28 @@ async def burpfact_command(interaction: discord.Interaction):
             "The pitch of a burp depends on the tightness of the esophagus!",
             "Collecting all cow burps could power methane-fueled generators!",
             "World Burp Day is unofficially celebrated by enthusiasts!",
-            "AI can't burp, but can simulate the sound!",
             "Burping on Mars would sound different due to thin atmosphere!",
-            "The average burp contains trace amounts of stomach enzymes!",
             "Burping can be a learned skill for ventriloquists!",
             "The echo of a burp in a cave can last several seconds!",
-            "Burps can carry odors from meals eaten hours ago!",
-            "In some animals, burping is a social signal!",
-            "Collecting burps could create a unique perfume scent!",
-            "Burping world records require official witnesses!",
             "Burping in different languages has onomatopoeic words!",
             "Burping in a vacuum would be silent but deadly!",
-            "Burping apps exist to simulate sounds for pranks!",
-            "The study of burping falls under gastroenterology!",
             "Burping can be contagious in social settings, like yawning!",
-            "In history, burping was once considered a medical treatment!",
-            "If animals could talk, their burps might say 'excuse me'!",
-            "Some plants release gas in a burp-like manner!",
-            "The future of burping may involve anti-gas tech wearables!",
-            "A burp-powered engine could run on cow emissions!"
+            "A burp-powered engine could theoretically run on cow emissions!",
+            "Burping while talking can change your voice pitch temporarily!",
+            "Chewing gum makes you swallow more air and burp more frequently!",
+            "Drinking through straws increases air intake and burping!",
+            "Pregnant women burp more due to hormonal changes!",
+            "Cold drinks cause more burping than warm ones!",
+            "Lying down after eating reduces burping!",
+            "Burping helps prevent acid reflux in many people!",
+            "Different foods create different burp sounds and smells!",
+            "Burping frequency decreases as you age!",
+            "Dogs and cats can burp too, but rarely do!",
+            "Eating beans increases burping due to complex sugars!",
+            "Some medications can increase or decrease burping!",
+            "Burping releases about 0.5 liters of gas on average!",
+            "Carbonated drinks make you burp more!",
+            "Burping after drinking milk is more common due to lactose!"
         ]
         
         # Select a random fact
@@ -1583,7 +1543,7 @@ async def stats_command(interaction: discord.Interaction):
             inline=False
         )
         
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         logger.info(f"Stats command used by {interaction.user.name}")
         
     except Exception as e:
