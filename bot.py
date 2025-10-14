@@ -406,19 +406,19 @@ class BurpBot:
                 # Get biggest win
                 if pool_id:
                     biggest_win = await conn.fetchrow(
-                        """SELECT wallet_address, prize_amount, created_at, gas.prize_token_symbol
+                        """SELECT gs.wallet_address, gs.prize_amount, gs.created_at, gas.prize_token_symbol
                            FROM gas_streaks gs
                            LEFT JOIN gas_admin_settings gas ON gs.pool_id = gas.pool_id
                            WHERE gs.won = true AND gs.pool_id = $1
-                           ORDER BY prize_amount DESC LIMIT 1""", pool_id
+                           ORDER BY gs.prize_amount DESC LIMIT 1""", pool_id
                     )
                 else:
                     biggest_win = await conn.fetchrow(
-                        """SELECT wallet_address, prize_amount, created_at, gas.prize_token_symbol
+                        """SELECT gs.wallet_address, gs.prize_amount, gs.created_at, gas.prize_token_symbol
                            FROM gas_streaks gs
                            LEFT JOIN gas_admin_settings gas ON gs.pool_id = gas.pool_id
                            WHERE gs.won = true
-                           ORDER BY prize_amount DESC LIMIT 1"""
+                           ORDER BY gs.prize_amount DESC LIMIT 1"""
                     )
                 
                 # Get recent winner
@@ -1154,8 +1154,8 @@ class StatsView(discord.ui.View):
         )
         
         embed.add_field(
-            name="💰 Total Payments",
-            value=f"```{stats['total_payments']:,} BURP```",
+            name="🎮 Total Plays",
+            value=f"```{stats['total_games']:,}```",
             inline=True
         )
         
@@ -1178,8 +1178,8 @@ class StatsView(discord.ui.View):
         )
         
         embed.add_field(
-            name="📈 Total Games Played",
-            value=f"```{stats['total_games']:,}```",
+            name="💰 Total Payments",
+            value=f"```{stats['total_payments']:,} BURP```",
             inline=True
         )
         
@@ -1275,7 +1275,7 @@ class StatsView(discord.ui.View):
         view = GasStreaksPoolView(self.user_id, stats['active_pools'])
         await interaction.edit_original_response(embed=embed, view=view)
     
-    @discord.ui.button(label='Burp Slots', style=discord.ButtonStyle.danger, emoji='🎰')
+    @discord.ui.button(label='Burp Slots', style=discord.ButtonStyle.blurple, emoji='🎰')
     async def burp_slots_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This is not your stats menu!", ephemeral=True)
