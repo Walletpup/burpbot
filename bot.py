@@ -1552,7 +1552,7 @@ async def stats_command(interaction: discord.Interaction):
         view = StatsView(interaction.user.id)
         
         embed = discord.Embed(
-            title="📊 Burp Statistics Dashboard",
+            title="Burp Statistics Dashboard",
             description="Select a category to view detailed statistics",
             color=0x00ff6b
         )
@@ -1566,19 +1566,19 @@ async def stats_command(interaction: discord.Interaction):
             pass
         
         embed.add_field(
-            name="📊 Overall Stats",
+            name="Overall Stats",
             value="View combined statistics across all games",
             inline=False
         )
         
         embed.add_field(
-            name="⚡ Gas Streaks",
+            name="Gas Streaks",
             value="Detailed Gas Streaks game statistics and pool information",
             inline=False
         )
         
         embed.add_field(
-            name="🎰 Burp Slots",
+            name="Burp Slots",
             value="Complete Burp Slots statistics, jackpots, and big wins",
             inline=False
         )
