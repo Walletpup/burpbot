@@ -1096,7 +1096,7 @@ class StatsView(discord.ui.View):
         embed = discord.Embed(
             title="Overall Platform Statistics",
             description="Combined statistics across all games",
-            color=0x00ff00
+            color=0x5865F2
         )
         
         # Add thumbnail
@@ -1132,7 +1132,7 @@ class StatsView(discord.ui.View):
         )
         
         embed.add_field(
-            name="Burp Slots",
+            name="Gas Mixer",
             value=f"```Players: {stats['slots_users']:,}\nSpins: {stats['slots_games']:,}\nWinnings: {stats['slots_winnings']:,}```",
             inline=True
         )
@@ -1161,7 +1161,7 @@ class StatsView(discord.ui.View):
         embed = discord.Embed(
             title="Gas Streaks Statistics",
             description="Complete Gas Streaks game statistics",
-            color=0x00ff00
+            color=0x57F287
         )
         
         # Add thumbnail
@@ -1235,7 +1235,7 @@ class StatsView(discord.ui.View):
         view = GasStreaksPoolView(self.user_id, stats['active_pools'])
         await interaction.edit_original_response(embed=embed, view=view)
     
-    @discord.ui.button(label='Burp Slots', style=discord.ButtonStyle.blurple, emoji='🎰')
+    @discord.ui.button(label='Gas Mixer', style=discord.ButtonStyle.danger, emoji='🧪')
     async def burp_slots_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This is not your stats menu!", ephemeral=True)
@@ -1245,13 +1245,13 @@ class StatsView(discord.ui.View):
         stats = await burp_bot.fetch_burp_slots_stats()
         
         if not stats:
-            await interaction.followup.send("❌ Could not fetch Burp Slots stats", ephemeral=True)
+            await interaction.followup.send("❌ Could not fetch Gas Mixer stats", ephemeral=True)
             return
         
         embed = discord.Embed(
-            title="Burp Slots Statistics",
-            description="Complete Burp Slots game statistics",
-            color=0xff0000
+            title="Gas Mixer Statistics",
+            description="Complete Gas Mixer game statistics",
+            color=0xED4245
         )
         
         # Add thumbnail
@@ -1382,8 +1382,8 @@ class GasStreaksPoolView(discord.ui.View):
         )
         
         embed.add_field(
-            name="Burp Slots",
-            value="Complete Burp Slots statistics, jackpots, and big wins",
+            name="Gas Mixer",
+            value="Complete Gas Mixer statistics, jackpots, and big wins",
             inline=False
         )
         
@@ -1421,7 +1421,7 @@ class GasStreaksPoolView(discord.ui.View):
         embed = discord.Embed(
             title=f"{token} Pool Statistics",
             description=f"Detailed statistics for {pool_info['pool_name']}",
-            color=0x00ff00
+            color=0x57F287
         )
         
         # Add thumbnail
@@ -1538,8 +1538,8 @@ async def stats_command(interaction: discord.Interaction):
         )
         
         embed.add_field(
-            name="Burp Slots",
-            value="Complete Burp Slots statistics, jackpots, and big wins",
+            name="Gas Mixer",
+            value="Complete Gas Mixer statistics, jackpots, and big wins",
             inline=False
         )
         
