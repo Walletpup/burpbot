@@ -301,6 +301,55 @@ class BurpBot:
                 logger.error(f"Error in new pool type monitoring: {e}")
                 await asyncio.sleep(60)  # Wait longer on error
     
+    async def fetch_overall_stats(self):
+        """Fetch overall statistics across both games"""
+        try:
+            if not self.db_pool:
+                return None
+            
+            async with self.db_pool.acquire() as conn:
+                # Total unique users across both games
+                gas_users = await conn.fetchval("SELECT COUNT(*) FROM gas_streak_users")
+                slots_users = await conn.fetchval("SELECT COUNT(*) FROM burp_slots_users")
+                
+                # Total payments (topups)
+                gas_topups = await conn.fetchval(
+                    "SELECT COALESCE(SUM(amount), 0) FROM gas_streak_topups"
+                )
+                slots_topups = await conn.fetchval(
+                    "SELECT COALESCE(SUM(amount), 0) FROM burp_slots_topups"
+                )
+                
+                # Total winnings
+                gas_winnings = await conn.fetchval(
+                    "SELECT COALESCE(SUM(prize_amount), 0) FROM gas_streaks WHERE won = true"
+                )
+                slots_winnings = await conn.fetchval(
+                    "SELECT COALESCE(SUM(payout), 0) FROM burp_slots_spins WHERE payout > 0"
+                )
+                
+                # Total games played
+                gas_games = await conn.fetchval("SELECT COUNT(*) FROM gas_streaks")
+                slots_games = await conn.fetchval("SELECT COUNT(*) FROM burp_slots_spins")
+                
+                return {
+                    "total_users": (gas_users or 0) + (slots_users or 0),
+                    "gas_users": gas_users or 0,
+                    "slots_users": slots_users or 0,
+                    "total_payments": int((gas_topups or 0) + (slots_topups or 0)),
+                    "gas_payments": int(gas_topups or 0),
+                    "slots_payments": int(slots_topups or 0),
+                    "total_winnings": int((gas_winnings or 0) + (slots_winnings or 0)),
+                    "gas_winnings": int(gas_winnings or 0),
+                    "slots_winnings": int(slots_winnings or 0),
+                    "total_games": (gas_games or 0) + (slots_games or 0),
+                    "gas_games": gas_games or 0,
+                    "slots_games": slots_games or 0
+                }
+        except Exception as e:
+            logger.error(f"Error fetching overall stats: {e}")
+            return None
+    
     async def fetch_gas_streaks_stats(self, pool_id=None):
         """Fetch real-time stats from burpcoin database for specific pool or all pools"""
         try:
@@ -309,20 +358,10 @@ class BurpBot:
                 return None
             
             async with self.db_pool.acquire() as conn:
-                # Query your burpcoin database for gas streaks stats using correct schema
-                
-                # Get total players (unique wallet addresses)
+                # Get total players
                 total_players = await conn.fetchval(
                     "SELECT COUNT(*) FROM gas_streak_users"
                 )
-                
-                # Get pool-specific or all pools data
-                if pool_id:
-                    pool_filter = "WHERE gs.pool_id = $1"
-                    pool_param = [pool_id]
-                else:
-                    pool_filter = ""
-                    pool_param = []
                 
                 # Get total streaks sent (pool-specific or all)
                 if pool_id:
@@ -334,7 +373,7 @@ class BurpBot:
                         "SELECT COUNT(*) FROM gas_streaks"
                     )
                 
-                # Get total winners (streaks that won)
+                # Get total winners
                 if pool_id:
                     total_winners = await conn.fetchval(
                         "SELECT COUNT(*) FROM gas_streaks WHERE won = true AND pool_id = $1", pool_id
@@ -344,7 +383,7 @@ class BurpBot:
                         "SELECT COUNT(*) FROM gas_streaks WHERE won = true"
                     )
                 
-                # Get total tokens won (pool-specific)
+                # Get total tokens won
                 if pool_id:
                     total_tokens_won = await conn.fetchval(
                         "SELECT COALESCE(SUM(prize_amount), 0) FROM gas_streaks WHERE won = true AND pool_id = $1", pool_id
@@ -354,7 +393,7 @@ class BurpBot:
                         "SELECT COALESCE(SUM(prize_amount), 0) FROM gas_streaks WHERE won = true"
                     )
                 
-                # Get active pools with their settings
+                # Get active pools
                 active_pools = await conn.fetch(
                     """SELECT gas.pool_id, gas.pool_name, gas.prize_token_symbol, 
                               gpp.total_amount, gas.is_active
@@ -364,152 +403,138 @@ class BurpBot:
                        ORDER BY gas.pool_order"""
                 )
                 
-                # Get total contributions (pool-specific or all)
+                # Get biggest win
                 if pool_id:
-                    total_contributions = await conn.fetchval(
-                        "SELECT COUNT(*) FROM gas_streaks WHERE pool_id = $1", pool_id
-                    )
-                    total_token_contributions = await conn.fetchval(
-                        "SELECT COALESCE(SUM(burp_amount), 0) FROM gas_streaks WHERE pool_id = $1", pool_id
+                    biggest_win = await conn.fetchrow(
+                        """SELECT wallet_address, prize_amount, created_at, gas.prize_token_symbol
+                           FROM gas_streaks gs
+                           LEFT JOIN gas_admin_settings gas ON gs.pool_id = gas.pool_id
+                           WHERE gs.won = true AND gs.pool_id = $1
+                           ORDER BY prize_amount DESC LIMIT 1""", pool_id
                     )
                 else:
-                    total_contributions = await conn.fetchval(
-                        "SELECT COUNT(*) FROM gas_streaks"
-                    )
-                    total_token_contributions = await conn.fetchval(
-                        "SELECT COALESCE(SUM(burp_amount), 0) FROM gas_streaks"
-                    )
-                
-                # Get recent winner info (pool-specific or all) - prioritize prize pool table data
-                if pool_id:
-                    # First try to get from prize pool table (more reliable)
-                    recent_winner = await conn.fetchrow(
-                        """SELECT gpp.last_winner_address as wallet_address, 
-                                  gpp.last_win_amount as prize_amount, 
-                                  gpp.last_win_date as created_at,
-                                  gas.prize_token_symbol,
-                                  gpp.pool_id
-                           FROM gas_streak_prize_pool gpp
-                           LEFT JOIN gas_admin_settings gas ON gpp.pool_id = gas.pool_id
-                           WHERE gpp.pool_id = $1 
-                           AND gpp.last_winner_address IS NOT NULL""", pool_id
-                    )
-                    
-                    # If no data in prize pool table, fallback to gas_streaks table
-                    if not recent_winner:
-                        recent_winner = await conn.fetchrow(
-                            """SELECT gs.wallet_address, gs.prize_amount, gs.created_at, gs.transaction_hash, gs.pool_id,
-                                      gas.prize_token_symbol
-                               FROM gas_streaks gs
-                               LEFT JOIN gas_admin_settings gas ON gs.pool_id = gas.pool_id
-                               WHERE gs.won = true AND gs.pool_id = $1
-                               ORDER BY gs.created_at DESC 
-                               LIMIT 1""", pool_id
-                        )
-                else:
-                    # For all pools, get the most recent winner from either table
-                    recent_winner = await conn.fetchrow(
-                        """SELECT gs.wallet_address, gs.prize_amount, gs.created_at, gs.transaction_hash, gs.pool_id,
-                                  gas.prize_token_symbol
+                    biggest_win = await conn.fetchrow(
+                        """SELECT wallet_address, prize_amount, created_at, gas.prize_token_symbol
                            FROM gas_streaks gs
                            LEFT JOIN gas_admin_settings gas ON gs.pool_id = gas.pool_id
                            WHERE gs.won = true
-                           ORDER BY gs.created_at DESC 
-                           LIMIT 1"""
+                           ORDER BY prize_amount DESC LIMIT 1"""
                     )
                 
-                # Get recent streak info (pool-specific or all)
+                # Get recent winner
                 if pool_id:
-                    recent_streak = await conn.fetchrow(
-                        """SELECT created_at, transaction_hash, wallet_address, pool_id
-                           FROM gas_streaks 
-                           WHERE pool_id = $1
-                           ORDER BY created_at DESC 
-                           LIMIT 1""", pool_id
+                    recent_winner = await conn.fetchrow(
+                        """SELECT gs.wallet_address, gs.prize_amount, gs.created_at, gas.prize_token_symbol
+                           FROM gas_streaks gs
+                           LEFT JOIN gas_admin_settings gas ON gs.pool_id = gas.pool_id
+                           WHERE gs.won = true AND gs.pool_id = $1
+                           ORDER BY gs.created_at DESC LIMIT 1""", pool_id
                     )
                 else:
-                    recent_streak = await conn.fetchrow(
-                        """SELECT created_at, transaction_hash, wallet_address, pool_id
-                           FROM gas_streaks 
-                           ORDER BY created_at DESC 
-                           LIMIT 1"""
+                    recent_winner = await conn.fetchrow(
+                        """SELECT gs.wallet_address, gs.prize_amount, gs.created_at, gas.prize_token_symbol
+                           FROM gas_streaks gs
+                           LEFT JOIN gas_admin_settings gas ON gs.pool_id = gas.pool_id
+                           WHERE gs.won = true
+                           ORDER BY gs.created_at DESC LIMIT 1"""
                     )
                 
-                # Calculate time differences
-                last_winner_time = "N/A"
-                last_game_time = "N/A"
-                
                 # Calculate time since last winner
+                last_winner_time = "N/A"
                 if recent_winner:
                     time_diff = datetime.utcnow() - recent_winner['created_at']
                     total_minutes = int(time_diff.total_seconds() // 60)
-                    
                     if total_minutes < 1:
                         last_winner_time = "Just now"
                     elif total_minutes < 60:
-                        last_winner_time = f"{total_minutes} minute{'s' if total_minutes != 1 else ''} ago"
+                        last_winner_time = f"{total_minutes}m ago"
                     else:
                         hours = total_minutes // 60
-                        remaining_minutes = total_minutes % 60
-                        if remaining_minutes == 0:
-                            last_winner_time = f"{hours} hour{'s' if hours != 1 else ''} ago"
-                        else:
-                            last_winner_time = f"{hours}h {remaining_minutes}m ago"
-                else:
-                    last_winner_time = "N/A"
+                        last_winner_time = f"{hours}h {total_minutes % 60}m ago" if total_minutes % 60 else f"{hours}h ago"
                 
-                # Calculate time since last game (streak)
-                if recent_streak:
-                    time_diff = datetime.utcnow() - recent_streak['created_at']
-                    total_minutes = int(time_diff.total_seconds() // 60)
-                    
-                    if total_minutes < 1:
-                        last_game_time = "Just now"
-                    elif total_minutes < 60:
-                        last_game_time = f"{total_minutes} minute{'s' if total_minutes != 1 else ''} ago"
-                    else:
-                        hours = total_minutes // 60
-                        remaining_minutes = total_minutes % 60
-                        if remaining_minutes == 0:
-                            last_game_time = f"{hours} hour{'s' if hours != 1 else ''} ago"
-                        else:
-                            last_game_time = f"{hours}h {remaining_minutes}m ago"
-                else:
-                    last_game_time = "N/A"
-                
-                # Get token symbol for recent winner
-                winner_token = recent_winner['prize_token_symbol'] if recent_winner else "TOKENS"
-                
-                # Format the response
                 return {
-                    "gas_streaks": {
-                        "active_pools": len(active_pools),
-                        "total_players": total_players or 0,
-                        "games_completed": total_streaks or 0,
-                        "total_tokens_won": f"{int(total_tokens_won or 0):,}"
-                    },
+                    "total_players": total_players or 0,
+                    "total_streaks": total_streaks or 0,
+                    "total_winners": total_winners or 0,
+                    "total_tokens_won": int(total_tokens_won or 0),
                     "active_pools": active_pools,
-                    "prize_pools": {
-                        "pools": [{
-                            "pool_id": pool['pool_id'],
-                            "pool_name": pool['pool_name'],
-                            "token_symbol": pool['prize_token_symbol'],
-                            "total_amount": float(pool['total_amount'] or 0),
-                            "is_active": pool['is_active']
-                        } for pool in active_pools],
-                        "total_contributions": f"{total_contributions or 0:,}",
-                        "total_token_contributions": f"{int(float(total_token_contributions or 0)):,}"
-                    },
-                    "recent_activity": {
-                        "last_winner": last_winner_time,
-                        "last_game": last_game_time,
-                        "last_amount_won": f"{int(float(recent_winner['prize_amount'])):,} {winner_token}" if recent_winner else "N/A",
-                        "pool_id": pool_id
-                    }
+                    "biggest_win": biggest_win,
+                    "recent_winner": recent_winner,
+                    "last_winner_time": last_winner_time,
+                    "pool_id": pool_id
                 }
                 
         except Exception as e:
-            logger.error(f"Error fetching stats from database: {e}")
+            logger.error(f"Error fetching gas streaks stats: {e}")
+            return None
+    
+    async def fetch_burp_slots_stats(self):
+        """Fetch Burp Slots statistics"""
+        try:
+            if not self.db_pool:
+                return None
+            
+            async with self.db_pool.acquire() as conn:
+                # Total players
+                total_players = await conn.fetchval(
+                    "SELECT COUNT(*) FROM burp_slots_users"
+                )
+                
+                # Total spins
+                total_spins = await conn.fetchval(
+                    "SELECT COUNT(*) FROM burp_slots_spins"
+                )
+                
+                # Total wagered
+                total_wagered = await conn.fetchval(
+                    "SELECT COALESCE(SUM(bet_amount), 0) FROM burp_slots_spins"
+                )
+                
+                # Total won
+                total_won = await conn.fetchval(
+                    "SELECT COALESCE(SUM(payout), 0) FROM burp_slots_spins WHERE payout > 0"
+                )
+                
+                # Biggest jackpot
+                biggest_jackpot = await conn.fetchrow(
+                    """SELECT wallet_address, payout, multiplier, created_at
+                       FROM burp_slots_jackpots
+                       ORDER BY payout DESC LIMIT 1"""
+                )
+                
+                # Biggest regular win
+                biggest_win = await conn.fetchrow(
+                    """SELECT wallet_address, payout, bet_amount, created_at
+                       FROM burp_slots_spins
+                       WHERE payout > 0
+                       ORDER BY payout DESC LIMIT 1"""
+                )
+                
+                # Recent big win (last 24 hours)
+                recent_big_win = await conn.fetchrow(
+                    """SELECT wallet_address, payout, bet_amount, created_at
+                       FROM burp_slots_spins
+                       WHERE payout >= 50 AND created_at > NOW() - INTERVAL '24 hours'
+                       ORDER BY created_at DESC LIMIT 1"""
+                )
+                
+                # Total jackpots
+                total_jackpots = await conn.fetchval(
+                    "SELECT COUNT(*) FROM burp_slots_jackpots"
+                )
+                
+                return {
+                    "total_players": total_players or 0,
+                    "total_spins": total_spins or 0,
+                    "total_wagered": int(total_wagered or 0),
+                    "total_won": int(total_won or 0),
+                    "biggest_jackpot": biggest_jackpot,
+                    "biggest_win": biggest_win,
+                    "recent_big_win": recent_big_win,
+                    "total_jackpots": total_jackpots or 0
+                }
+        except Exception as e:
+            logger.error(f"Error fetching burp slots stats: {e}")
             return None
     
     def get_fallback_stats(self, guild):
@@ -1034,8 +1059,8 @@ async def help_command(interaction: discord.Interaction):
             name="Commands",
             value="`/burp` - Post a random burp sound from our collection\n"
                   "`/burpfact` - Get a random interesting burp fact\n"
-                  "`/stats` - Show multi-pool Gas Streaks overview\n"
-                  "`/stats <token>` - Show specific token pool details",
+                  "`/stats` - Interactive statistics dashboard for all games\n"
+                  "`/help` - Show this help message",
             inline=False
         )
         # Community links
@@ -1089,12 +1114,430 @@ async def pool_autocomplete(interaction: discord.Interaction, current: str) -> l
         logger.error(f"Error in pool autocomplete: {e}")
         return []
 
-@bot.tree.command(name='stats', description='Show Gas Streaks statistics for all pools or a specific pool')
-@discord.app_commands.autocomplete(pool=pool_autocomplete)
-async def stats_command(interaction: discord.Interaction, pool: str = None):
-    """Show Gas Streaks statistics - available to everyone"""
+class StatsView(discord.ui.View):
+    """Interactive stats view with buttons"""
+    def __init__(self, user_id: int):
+        super().__init__(timeout=180)  # 3 minute timeout
+        self.user_id = user_id
+    
+    @discord.ui.button(label='Overall Stats', style=discord.ButtonStyle.primary, emoji='📊')
+    async def overall_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your stats menu!", ephemeral=True)
+            return
+        
+        await interaction.response.defer()
+        stats = await burp_bot.fetch_overall_stats()
+        
+        if not stats:
+            await interaction.followup.send("❌ Could not fetch overall stats", ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title="📊 Overall Platform Statistics",
+            description="Combined statistics across all games",
+            color=0x00ff00
+        )
+        
+        # Add thumbnail
+        try:
+            target_user = interaction.client.get_user(1419117925465460878)
+            if target_user:
+                embed.set_thumbnail(url=target_user.display_avatar.url)
+        except:
+            pass
+        
+        embed.add_field(
+            name="👥 Total Users",
+            value=f"```{stats['total_users']:,}```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="💰 Total Payments",
+            value=f"```{stats['total_payments']:,} BURP```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🏆 Total Winnings",
+            value=f"```{stats['total_winnings']:,} BURP```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🎮 Gas Streaks",
+            value=f"```Players: {stats['gas_users']:,}\nGames: {stats['gas_games']:,}\nWinnings: {stats['gas_winnings']:,}```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🎰 Burp Slots",
+            value=f"```Players: {stats['slots_users']:,}\nSpins: {stats['slots_games']:,}\nWinnings: {stats['slots_winnings']:,}```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="📈 Total Games Played",
+            value=f"```{stats['total_games']:,}```",
+            inline=True
+        )
+        
+        await interaction.edit_original_response(embed=embed, view=self)
+    
+    @discord.ui.button(label='Gas Streaks', style=discord.ButtonStyle.success, emoji='⚡')
+    async def gas_streaks_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your stats menu!", ephemeral=True)
+            return
+        
+        await interaction.response.defer()
+        stats = await burp_bot.fetch_gas_streaks_stats()
+        
+        if not stats:
+            await interaction.followup.send("❌ Could not fetch Gas Streaks stats", ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title="⚡ Gas Streaks Statistics",
+            description="Complete Gas Streaks game statistics",
+            color=0x00ff00
+        )
+        
+        # Add thumbnail
+        try:
+            target_user = interaction.client.get_user(1419117925465460878)
+            if target_user:
+                embed.set_thumbnail(url=target_user.display_avatar.url)
+        except:
+            pass
+        
+        embed.add_field(
+            name="👥 Total Players",
+            value=f"```{stats['total_players']:,}```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🎮 Total Streaks",
+            value=f"```{stats['total_streaks']:,}```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🏆 Total Winners",
+            value=f"```{stats['total_winners']:,}```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="💰 Total Tokens Won",
+            value=f"```{stats['total_tokens_won']:,}```",
+            inline=True
+        )
+        
+        # Active pools
+        if stats['active_pools']:
+            pool_lines = []
+            for pool in stats['active_pools'][:5]:
+                amount = int(pool['total_amount'] or 0)
+                pool_lines.append(f"{pool['prize_token_symbol']}: {amount:,}")
+            
+            embed.add_field(
+                name="🎯 Active Pools",
+                value="```" + "\n".join(pool_lines) + "```",
+                inline=True
+            )
+        
+        # Biggest win
+        if stats['biggest_win']:
+            win = stats['biggest_win']
+            addr = win['wallet_address']
+            truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
+            embed.add_field(
+                name="💎 Biggest Win",
+                value=f"```{int(win['prize_amount']):,} {win['prize_token_symbol']}\n{truncated}```",
+                inline=True
+            )
+        
+        # Recent winner
+        if stats['recent_winner']:
+            win = stats['recent_winner']
+            addr = win['wallet_address']
+            truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
+            embed.add_field(
+                name="🕐 Recent Winner",
+                value=f"```{int(win['prize_amount']):,} {win['prize_token_symbol']}\n{truncated}\n{stats['last_winner_time']}```",
+                inline=False
+            )
+        
+        # Add pool selection view with pools
+        view = GasStreaksPoolView(self.user_id, stats['active_pools'])
+        await interaction.edit_original_response(embed=embed, view=view)
+    
+    @discord.ui.button(label='Burp Slots', style=discord.ButtonStyle.danger, emoji='🎰')
+    async def burp_slots_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your stats menu!", ephemeral=True)
+            return
+        
+        await interaction.response.defer()
+        stats = await burp_bot.fetch_burp_slots_stats()
+        
+        if not stats:
+            await interaction.followup.send("❌ Could not fetch Burp Slots stats", ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title="🎰 Burp Slots Statistics",
+            description="Complete Burp Slots game statistics",
+            color=0xff0000
+        )
+        
+        # Add thumbnail
+        try:
+            target_user = interaction.client.get_user(1419117925465460878)
+            if target_user:
+                embed.set_thumbnail(url=target_user.display_avatar.url)
+        except:
+            pass
+        
+        embed.add_field(
+            name="👥 Total Players",
+            value=f"```{stats['total_players']:,}```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🎰 Total Spins",
+            value=f"```{stats['total_spins']:,}```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="💎 Total Jackpots",
+            value=f"```{stats['total_jackpots']:,}```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="💰 Total Wagered",
+            value=f"```{stats['total_wagered']:,} BURP```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🏆 Total Won",
+            value=f"```{stats['total_won']:,} BURP```",
+            inline=True
+        )
+        
+        # Calculate RTP
+        rtp = (stats['total_won'] / stats['total_wagered'] * 100) if stats['total_wagered'] > 0 else 0
+        embed.add_field(
+            name="📊 RTP",
+            value=f"```{rtp:.2f}%```",
+            inline=True
+        )
+        
+        # Biggest jackpot
+        if stats['biggest_jackpot']:
+            jp = stats['biggest_jackpot']
+            addr = jp['wallet_address']
+            truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
+            embed.add_field(
+                name="💎 Biggest Jackpot",
+                value=f"```{int(jp['payout']):,} BURP\n{jp['multiplier']}x Multiplier\n{truncated}```",
+                inline=True
+            )
+        
+        # Biggest win
+        if stats['biggest_win']:
+            win = stats['biggest_win']
+            addr = win['wallet_address']
+            truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
+            multiplier = win['payout'] / win['bet_amount'] if win['bet_amount'] > 0 else 0
+            embed.add_field(
+                name="🏆 Biggest Win",
+                value=f"```{int(win['payout']):,} BURP\n{multiplier:.1f}x Multiplier\n{truncated}```",
+                inline=True
+            )
+        
+        # Recent big win
+        if stats['recent_big_win']:
+            win = stats['recent_big_win']
+            addr = win['wallet_address']
+            truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
+            embed.add_field(
+                name="🕐 Recent Big Win (24h)",
+                value=f"```{int(win['payout']):,} BURP\n{truncated}```",
+                inline=True
+            )
+        
+        await interaction.edit_original_response(embed=embed, view=self)
+
+class GasStreaksPoolView(discord.ui.View):
+    """View for selecting specific Gas Streaks pools"""
+    def __init__(self, user_id: int, pools=None):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        
+        # Add pool options if provided
+        if pools:
+            for child in self.children:
+                if isinstance(child, discord.ui.Select):
+                    child.options = [
+                        discord.SelectOption(
+                            label=f"{p['prize_token_symbol']} - {p['pool_name']}",
+                            value=p['pool_id'],
+                            emoji="⚡"
+                        )
+                        for p in pools
+                    ]
+    
+    @discord.ui.button(label='Back to Main', style=discord.ButtonStyle.secondary, emoji='◀️')
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your stats menu!", ephemeral=True)
+            return
+        
+        # Return to main stats view
+        view = StatsView(self.user_id)
+        embed = discord.Embed(
+            title="📊 Burp Statistics Dashboard",
+            description="Select a category to view detailed statistics",
+            color=0x00ff6b
+        )
+        
+        embed.add_field(
+            name="📊 Overall Stats",
+            value="View combined statistics across all games",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="⚡ Gas Streaks",
+            value="Detailed Gas Streaks game statistics and pool information",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🎰 Burp Slots",
+            value="Complete Burp Slots statistics, jackpots, and big wins",
+            inline=False
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=view)
+    
+    @discord.ui.select(
+        placeholder="Select a pool to view detailed stats",
+        min_values=1,
+        max_values=1,
+        custom_id="pool_select",
+        options=[discord.SelectOption(label="Loading pools...", value="loading")]
+    )
+    async def pool_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your stats menu!", ephemeral=True)
+            return
+        
+        await interaction.response.defer()
+        pool_id = select.values[0]
+        
+        stats = await burp_bot.fetch_gas_streaks_stats(pool_id)
+        
+        if not stats:
+            await interaction.followup.send("❌ Could not fetch pool stats", ephemeral=True)
+            return
+        
+        # Find pool info
+        pool_info = next((p for p in stats['active_pools'] if p['pool_id'] == pool_id), None)
+        if not pool_info:
+            await interaction.followup.send("❌ Pool not found", ephemeral=True)
+            return
+        
+        token = pool_info['prize_token_symbol']
+        
+        embed = discord.Embed(
+            title=f"⚡ {token} Pool Statistics",
+            description=f"Detailed statistics for {pool_info['pool_name']}",
+            color=0x00ff00
+        )
+        
+        # Add thumbnail
+        try:
+            target_user = interaction.client.get_user(1419117925465460878)
+            if target_user:
+                embed.set_thumbnail(url=target_user.display_avatar.url)
+        except:
+            pass
+        
+        embed.add_field(
+            name="💰 Current Prize Pool",
+            value=f"```{int(pool_info['total_amount'] or 0):,} {token}```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🎮 Total Streaks",
+            value=f"```{stats['total_streaks']:,}```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🏆 Total Winners",
+            value=f"```{stats['total_winners']:,}```",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="💎 Total Won",
+            value=f"```{stats['total_tokens_won']:,} {token}```",
+            inline=True
+        )
+        
+        # Win rate
+        win_rate = (stats['total_winners'] / stats['total_streaks'] * 100) if stats['total_streaks'] > 0 else 0
+        embed.add_field(
+            name="📊 Win Rate",
+            value=f"```{win_rate:.2f}%```",
+            inline=True
+        )
+        
+        # Biggest win for this pool
+        if stats['biggest_win']:
+            win = stats['biggest_win']
+            addr = win['wallet_address']
+            truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
+            embed.add_field(
+                name="💎 Biggest Win",
+                value=f"```{int(win['prize_amount']):,} {token}\n{truncated}```",
+                inline=True
+            )
+        
+        # Recent winner for this pool
+        if stats['recent_winner']:
+            win = stats['recent_winner']
+            addr = win['wallet_address']
+            truncated = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 20 else addr
+            embed.add_field(
+                name="🕐 Recent Winner",
+                value=f"```{int(win['prize_amount']):,} {token}\n{truncated}\n{stats['last_winner_time']}```",
+                inline=False
+            )
+        
+        await interaction.edit_original_response(embed=embed, view=self)
+    
+    async def on_timeout(self):
+        # Disable all items when view times out
+        for item in self.children:
+            item.disabled = True
+
+@bot.tree.command(name='stats', description='View comprehensive Burp platform statistics')
+async def stats_command(interaction: discord.Interaction):
+    """Show interactive stats dashboard"""
     try:
-        # Check cooldown (30 seconds)
+        # Check cooldown (10 seconds)
         can_use, time_left = check_cooldown(interaction.user.id, stats_cooldowns, 10)
         if not can_use:
             embed = discord.Embed(
@@ -1105,121 +1548,48 @@ async def stats_command(interaction: discord.Interaction, pool: str = None):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
-        # Defer response
-        await interaction.response.defer()
-        
-        # Try to fetch real stats from database
-        stats_data = await burp_bot.fetch_gas_streaks_stats(pool)
-        
-        # If database fails, use fallback stats
-        if not stats_data:
-            stats_data = burp_bot.get_fallback_stats(interaction.guild)
-        else:
-            # Add Discord community data to database stats
-            burper_role = discord.utils.get(interaction.guild.roles, name=BURPER_ROLE_NAME)
-            verified_count = len([m for m in interaction.guild.members if burper_role and burper_role in m.roles]) if burper_role else 0
-            online_count = len([m for m in interaction.guild.members if m.status != discord.Status.offline])
-            
-            stats_data["community"] = {
-                "discord_members": len(interaction.guild.members),
-                "verified_burpers": verified_count,
-                "online_now": online_count,
-                "bot_status": "Online ✅"
-            }
-        
-        # Create embed with appropriate title
-        if pool:
-            embed_title = f"Gas Streaks Statistics - {pool.upper()} Pool"
-            embed_description = f"Detailed statistics for the {pool.upper()} pool"
-        else:
-            embed_title = "Gas Streaks Multi-Pool Statistics"
-            embed_description = "Complete overview of all active token pools"
+        # Create main stats view
+        view = StatsView(interaction.user.id)
         
         embed = discord.Embed(
-            title=embed_title,
-            description=embed_description,
-            color=0x00ff00
+            title="📊 Burp Statistics Dashboard",
+            description="Select a category to view detailed statistics",
+            color=0x00ff6b
         )
         
-        # Overall Game Statistics (only show for all pools view)
-        if not pool:
-            gas_stats = stats_data.get("gas_streaks", {})
-            embed.add_field(
-                name="Overall Game Stats",
-                value="```" +
-                      f"Active Pool Types: {gas_stats.get('active_pools', 'N/A')}\n" +
-                      f"Total Players: {gas_stats.get('total_players', 'N/A')}\n" +
-                      f"Games Completed: {gas_stats.get('games_completed', 'N/A')}\n" +
-                      f"Total Tokens Won: {gas_stats.get('total_tokens_won', 'N/A')}" +
-                      "```",
-                inline=True
-            )
+        # Add thumbnail
+        try:
+            target_user = bot.get_user(1419117925465460878)
+            if target_user:
+                embed.set_thumbnail(url=target_user.display_avatar.url)
+        except:
+            pass
         
-        # Active Pools Information - Enhanced Layout
-        active_pools = stats_data.get("active_pools", [])
-        if active_pools and not pool:  # Show all pools overview
-            # Group pools by size for better display
-            pool_info_lines = []
-            total_pool_value = 0
-            
-            for pool_data in active_pools[:8]:  # Show up to 8 pools
-                pool_amount = int(pool_data['total_amount']) if pool_data['total_amount'] else 0
-                total_pool_value += pool_amount
-                
-                pool_info_lines.append(f"{pool_data['prize_token_symbol']}: {pool_amount:,}")
-            
-            embed.add_field(
-                name="Active Token Pools",
-                value="```" + "\n".join(pool_info_lines) + f"\n\nTotal Pool Value: {total_pool_value:,} Tokens" + "```",
-                inline=True
-            )
-            
-            # Token Diversity Stats
-            unique_tokens = len(set(p['prize_token_symbol'] for p in active_pools))
-            embed.add_field(
-                name="Pool Diversity",
-                value="```" +
-                      f"Unique Tokens: {unique_tokens}\n" +
-                      f"Largest Pool: {max((int(p['total_amount']) for p in active_pools), default=0):,}\n" +
-                      f"Smallest Pool: {min((int(p['total_amount']) for p in active_pools if int(p['total_amount']) > 0), default=0):,}" +
-                      "```",
-                inline=True
-            )
-            
-        elif pool and active_pools:
-            # Show specific pool details
-            pool_data = next((p for p in active_pools if p['pool_id'].lower() == pool.lower() or p['prize_token_symbol'].lower() == pool.lower()), None)
-            if pool_data:
-                pool_amount = f"{int(pool_data['total_amount']):,}" if pool_data['total_amount'] else "0"
-                embed.add_field(
-                    name=f"{pool_data['pool_name']} Details",
-                    value=f"```Prize Pool: {pool_amount} {pool_data['prize_token_symbol']}\nPool ID: {pool_data['pool_id']}\nStatus: {'Active' if pool_data['is_active'] else 'Inactive'}```",
-                    inline=False
-                )
+        embed.add_field(
+            name="📊 Overall Stats",
+            value="View combined statistics across all games",
+            inline=False
+        )
         
-        # Recent Activity with Token Info (only for all pools view)
-        if not pool:
-            activity_stats = stats_data.get("recent_activity", {})
-            embed.add_field(
-                name="Recent Activity",
-                value="```" +
-                      f"Last Winner: {activity_stats.get('last_winner', 'N/A')}\n" +
-                      f"Last Game: {activity_stats.get('last_game', 'N/A')}\n" +
-                      f"Prize Won: {activity_stats.get('last_amount_won', 'N/A')}" +
-                      "```",
-                inline=False
-            )
+        embed.add_field(
+            name="⚡ Gas Streaks",
+            value="Detailed Gas Streaks game statistics and pool information",
+            inline=False
+        )
         
-        # No footer - removed as requested
+        embed.add_field(
+            name="🎰 Burp Slots",
+            value="Complete Burp Slots statistics, jackpots, and big wins",
+            inline=False
+        )
         
-        # Send the stats embed
-        await interaction.followup.send(embed=embed)
-        logger.info(f"Stats command used by {interaction.user.name} for pool: {pool or 'all'}")
+        await interaction.response.send_message(embed=embed, view=view)
+        logger.info(f"Stats command used by {interaction.user.name}")
         
     except Exception as e:
         logger.error(f"Error in stats command: {e}")
         try:
-            await interaction.followup.send("❌ Error retrieving statistics. Please try again later.")
+            await interaction.response.send_message("❌ Error retrieving statistics. Please try again later.", ephemeral=True)
         except:
             pass
 
