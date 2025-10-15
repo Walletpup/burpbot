@@ -1391,14 +1391,29 @@ class GasStreaksPoolView(discord.ui.View):
         await interaction.response.defer()
         pool_id = select.values[0]
         
+        # Fetch fresh stats for this specific pool
         stats = await burp_bot.fetch_gas_streaks_stats(pool_id)
         
         if not stats:
             await interaction.followup.send("❌ Could not fetch pool stats", ephemeral=True)
             return
         
-        # Find pool info
-        pool_info = next((p for p in stats['active_pools'] if p['pool_id'] == pool_id), None)
+        # Fetch fresh pool info directly from database to ensure we have the correct current prize amount
+        try:
+            async with burp_bot.db_pool.acquire() as conn:
+                pool_info = await conn.fetchrow(
+                    """SELECT gas.pool_id, gas.pool_name, gas.prize_token_symbol, 
+                              gpp.total_amount, gas.is_active
+                       FROM gas_admin_settings gas
+                       LEFT JOIN gas_streak_prize_pool gpp ON gas.pool_id = gpp.pool_id
+                       WHERE gas.pool_id = $1 AND gas.is_active = true""",
+                    pool_id
+                )
+        except Exception as e:
+            logger.error(f"Error fetching pool info: {e}")
+            await interaction.followup.send("❌ Could not fetch pool info", ephemeral=True)
+            return
+        
         if not pool_info:
             await interaction.followup.send("❌ Pool not found", ephemeral=True)
             return
