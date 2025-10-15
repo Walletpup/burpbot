@@ -1195,20 +1195,7 @@ class StatsView(discord.ui.View):
             value=f"```{stats['total_tokens_won']:,}```",
             inline=True
         )
-        
-        # Active pools
-        if stats['active_pools']:
-            pool_lines = []
-            for pool in stats['active_pools'][:5]:
-                amount = int(pool['total_amount'] or 0)
-                pool_lines.append(f"{pool['prize_token_symbol']}: {amount:,}")
-            
-            embed.add_field(
-                name="Active Pools",
-                value="```" + "\n".join(pool_lines) + "```",
-                inline=True
-            )
-        
+
         # Biggest win
         if stats['biggest_win']:
             win = stats['biggest_win']
