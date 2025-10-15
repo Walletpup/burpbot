@@ -24,6 +24,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.guilds = True
+intents.moderation = True  # For audit logs (bans, kicks, etc.)
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
@@ -33,6 +34,7 @@ NEW_PRIZE_POOLS_CHANNEL = 1420198889918566541
 VERIFICATION_CHANNEL = 1419189311139614841
 WELCOME_CHANNEL = 1419154118085181523
 LINKS_CHANNEL = 1419154016448938004
+LOGS_CHANNEL = 1427883248201236540
 
 # Winner notification settings
 MIN_BURP_NOTIFICATION_THRESHOLD = 100000  # Minimum BURP amount to trigger winner notification
@@ -53,6 +55,15 @@ stats_cooldowns = {}
 
 # Auto-moderation settings
 auto_mod_enabled = True
+spam_detection_enabled = True
+
+# Spam detection settings
+SPAM_MESSAGE_THRESHOLD = 5  # Number of messages
+SPAM_TIME_WINDOW = 5  # Seconds
+SPAM_DUPLICATE_THRESHOLD = 3  # Same message repeated
+
+# User message tracking for spam detection
+user_message_history = {}  # {user_id: [(timestamp, message_content), ...]}
 
 # Discord invite link patterns
 DISCORD_INVITE_PATTERNS = [
@@ -676,6 +687,84 @@ class BurpBot:
                 return True
         return False
     
+    async def send_log(self, embed):
+        """Send log embed to logs channel"""
+        try:
+            logs_channel = self.bot.get_channel(LOGS_CHANNEL)
+            if logs_channel:
+                await logs_channel.send(embed=embed)
+        except Exception as e:
+            logger.error(f"Error sending log: {e}")
+    
+    def check_spam(self, user_id, message_content):
+        """Check if user is spamming"""
+        current_time = time.time()
+        
+        # Initialize user history if not exists
+        if user_id not in user_message_history:
+            user_message_history[user_id] = []
+        
+        # Clean old messages outside time window
+        user_message_history[user_id] = [
+            (timestamp, content) for timestamp, content in user_message_history[user_id]
+            if current_time - timestamp < SPAM_TIME_WINDOW
+        ]
+        
+        # Add current message
+        user_message_history[user_id].append((current_time, message_content))
+        
+        # Check for rapid messages
+        if len(user_message_history[user_id]) >= SPAM_MESSAGE_THRESHOLD:
+            return True, "rapid_messages"
+        
+        # Check for duplicate messages
+        recent_messages = [content for _, content in user_message_history[user_id]]
+        if recent_messages.count(message_content) >= SPAM_DUPLICATE_THRESHOLD:
+            return True, "duplicate_messages"
+        
+        return False, None
+    
+    async def handle_spam(self, message, spam_type):
+        """Handle spam detection and moderation"""
+        try:
+            # Delete the message
+            await message.delete()
+            
+            # Send warning message that auto-deletes
+            if spam_type == "rapid_messages":
+                warning_msg = await message.channel.send(
+                    f"⚠️ {message.author.mention}, slow down! You're sending messages too quickly.",
+                    delete_after=5
+                )
+            elif spam_type == "duplicate_messages":
+                warning_msg = await message.channel.send(
+                    f"⚠️ {message.author.mention}, please don't spam the same message repeatedly.",
+                    delete_after=5
+                )
+            
+            # Log to logs channel
+            embed = discord.Embed(
+                title="🚨 Spam Detected",
+                color=0xff9900,
+                timestamp=datetime.utcnow()
+            )
+            embed.add_field(name="User", value=f"{message.author.mention} ({message.author})", inline=False)
+            embed.add_field(name="Channel", value=message.channel.mention, inline=True)
+            embed.add_field(name="Type", value=spam_type.replace("_", " ").title(), inline=True)
+            embed.add_field(name="Message", value=message.content[:1024] if message.content else "*No content*", inline=False)
+            embed.set_footer(text=f"User ID: {message.author.id}")
+            
+            await self.send_log(embed)
+            
+            logger.info(f"Deleted spam ({spam_type}) from {message.author.name} ({message.author.id}) in #{message.channel.name}")
+            
+        except discord.errors.NotFound:
+            pass
+        except discord.errors.Forbidden:
+            logger.error("Bot doesn't have permission to delete messages")
+        except Exception as e:
+            logger.error(f"Error handling spam: {e}")
+    
     async def handle_discord_invite(self, message):
         """Handle Discord invite link detection and moderation"""
         try:
@@ -688,16 +777,22 @@ class BurpBot:
                 delete_after=5
             )
             
-            # Log the moderation action
+            # Log to logs channel
+            embed = discord.Embed(
+                title="🚫 Discord Invite Blocked",
+                color=0xff0000,
+                timestamp=datetime.utcnow()
+            )
+            embed.add_field(name="User", value=f"{message.author.mention} ({message.author})", inline=False)
+            embed.add_field(name="Channel", value=message.channel.mention, inline=True)
+            embed.add_field(name="Message", value=message.content[:1024], inline=False)
+            embed.set_footer(text=f"User ID: {message.author.id}")
+            
+            await self.send_log(embed)
+            
             logger.info(f"Deleted Discord invite from {message.author.name} ({message.author.id}) in #{message.channel.name}")
             
-            # Optional: Send to mod log channel (you can add a mod log channel ID if needed)
-            # mod_log_channel = self.bot.get_channel(MOD_LOG_CHANNEL_ID)
-            # if mod_log_channel:
-            #     await mod_log_channel.send(embed=embed)
-            
         except discord.errors.NotFound:
-            # Message was already deleted
             pass
         except discord.errors.Forbidden:
             logger.error("Bot doesn't have permission to delete messages")
@@ -938,30 +1033,6 @@ async def on_ready():
             name="The Burp Community"
         )
     )
-
-@bot.event
-async def on_member_join(member):
-    """Welcome new members"""
-    try:
-        channel = bot.get_channel(WELCOME_CHANNEL)
-        if not channel:
-            logger.error(f"Could not find welcome channel {WELCOME_CHANNEL}")
-            return
-        
-        embed = discord.Embed(
-            title="Welcome!",
-            description=f"Hey mmhmmphff {member.mention}!",
-            color=0x00ff00
-        )
-        
-        # Set the user's avatar as the main image
-        embed.set_image(url=member.display_avatar.url)
-        
-        await channel.send(embed=embed)
-        logger.info(f"Sent welcome message for {member.name}")
-        
-    except Exception as e:
-        logger.error(f"Error sending welcome message: {e}")
 
 @bot.tree.command(name='purge', description='Delete messages in bulk (Admin only)')
 async def purge_command(interaction: discord.Interaction, amount: int):
@@ -1719,19 +1790,277 @@ async def stats_command(interaction: discord.Interaction):
 # Old verification command removed - now using button system
 
 @bot.event
+async def on_message_delete(message):
+    """Log deleted messages"""
+    if message.author.bot:
+        return
+    
+    try:
+        embed = discord.Embed(
+            title="🗑️ Message Deleted",
+            color=0xff6b6b,
+            timestamp=datetime.utcnow()
+        )
+        embed.add_field(name="Author", value=f"{message.author.mention} ({message.author})", inline=False)
+        embed.add_field(name="Channel", value=message.channel.mention, inline=True)
+        
+        # Add message content if available
+        if message.content:
+            content = message.content[:1024]
+            embed.add_field(name="Content", value=content, inline=False)
+        
+        # Add attachments info if any
+        if message.attachments:
+            attachments_info = "\n".join([f"[{att.filename}]({att.url})" for att in message.attachments])
+            embed.add_field(name="Attachments", value=attachments_info[:1024], inline=False)
+        
+        embed.set_footer(text=f"User ID: {message.author.id} | Message ID: {message.id}")
+        
+        await burp_bot.send_log(embed)
+    except Exception as e:
+        logger.error(f"Error logging message delete: {e}")
+
+@bot.event
+async def on_message_edit(before, after):
+    """Log edited messages"""
+    if before.author.bot or before.content == after.content:
+        return
+    
+    try:
+        embed = discord.Embed(
+            title="✏️ Message Edited",
+            color=0xffa500,
+            timestamp=datetime.utcnow()
+        )
+        embed.add_field(name="Author", value=f"{before.author.mention} ({before.author})", inline=False)
+        embed.add_field(name="Channel", value=before.channel.mention, inline=True)
+        embed.add_field(name="Message Link", value=f"[Jump to Message]({after.jump_url})", inline=True)
+        
+        # Before content
+        if before.content:
+            embed.add_field(name="Before", value=before.content[:1024], inline=False)
+        
+        # After content
+        if after.content:
+            embed.add_field(name="After", value=after.content[:1024], inline=False)
+        
+        embed.set_footer(text=f"User ID: {before.author.id} | Message ID: {before.id}")
+        
+        await burp_bot.send_log(embed)
+    except Exception as e:
+        logger.error(f"Error logging message edit: {e}")
+
+@bot.event
+async def on_member_update(before, after):
+    """Log member updates (nickname changes, role changes)"""
+    try:
+        # Check for nickname change
+        if before.nick != after.nick:
+            embed = discord.Embed(
+                title="📝 Nickname Changed",
+                color=0x3498db,
+                timestamp=datetime.utcnow()
+            )
+            embed.add_field(name="Member", value=f"{after.mention} ({after})", inline=False)
+            embed.add_field(name="Before", value=before.nick or "*None*", inline=True)
+            embed.add_field(name="After", value=after.nick or "*None*", inline=True)
+            embed.set_thumbnail(url=after.display_avatar.url)
+            embed.set_footer(text=f"User ID: {after.id}")
+            
+            await burp_bot.send_log(embed)
+        
+        # Check for role changes
+        if before.roles != after.roles:
+            added_roles = [role for role in after.roles if role not in before.roles]
+            removed_roles = [role for role in before.roles if role not in after.roles]
+            
+            if added_roles or removed_roles:
+                embed = discord.Embed(
+                    title="🎭 Roles Updated",
+                    color=0x9b59b6,
+                    timestamp=datetime.utcnow()
+                )
+                embed.add_field(name="Member", value=f"{after.mention} ({after})", inline=False)
+                
+                if added_roles:
+                    embed.add_field(name="Added Roles", value=", ".join([role.mention for role in added_roles]), inline=False)
+                
+                if removed_roles:
+                    embed.add_field(name="Removed Roles", value=", ".join([role.mention for role in removed_roles]), inline=False)
+                
+                embed.set_thumbnail(url=after.display_avatar.url)
+                embed.set_footer(text=f"User ID: {after.id}")
+                
+                await burp_bot.send_log(embed)
+    except Exception as e:
+        logger.error(f"Error logging member update: {e}")
+
+@bot.event
+async def on_member_ban(guild, user):
+    """Log member bans"""
+    try:
+        # Try to get ban reason from audit log
+        ban_reason = "No reason provided"
+        banned_by = "Unknown"
+        
+        try:
+            async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
+                if entry.target.id == user.id:
+                    ban_reason = entry.reason or "No reason provided"
+                    banned_by = entry.user
+                    break
+        except:
+            pass
+        
+        embed = discord.Embed(
+            title="🔨 Member Banned",
+            color=0xe74c3c,
+            timestamp=datetime.utcnow()
+        )
+        embed.add_field(name="User", value=f"{user.mention} ({user})", inline=False)
+        embed.add_field(name="Banned By", value=str(banned_by), inline=True)
+        embed.add_field(name="Reason", value=ban_reason, inline=False)
+        embed.set_thumbnail(url=user.display_avatar.url)
+        embed.set_footer(text=f"User ID: {user.id}")
+        
+        await burp_bot.send_log(embed)
+    except Exception as e:
+        logger.error(f"Error logging member ban: {e}")
+
+@bot.event
+async def on_member_unban(guild, user):
+    """Log member unbans"""
+    try:
+        # Try to get unban info from audit log
+        unbanned_by = "Unknown"
+        
+        try:
+            async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.unban):
+                if entry.target.id == user.id:
+                    unbanned_by = entry.user
+                    break
+        except:
+            pass
+        
+        embed = discord.Embed(
+            title="🔓 Member Unbanned",
+            color=0x2ecc71,
+            timestamp=datetime.utcnow()
+        )
+        embed.add_field(name="User", value=f"{user.mention} ({user})", inline=False)
+        embed.add_field(name="Unbanned By", value=str(unbanned_by), inline=True)
+        embed.set_thumbnail(url=user.display_avatar.url)
+        embed.set_footer(text=f"User ID: {user.id}")
+        
+        await burp_bot.send_log(embed)
+    except Exception as e:
+        logger.error(f"Error logging member unban: {e}")
+
+@bot.event
+async def on_member_remove(member):
+    """Log member leaves/kicks"""
+    try:
+        # Check if it was a kick by looking at audit logs
+        was_kicked = False
+        kicked_by = None
+        kick_reason = None
+        
+        try:
+            async for entry in member.guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
+                if entry.target.id == member.id:
+                    # Check if kick happened within last 5 seconds
+                    if (datetime.utcnow() - entry.created_at).total_seconds() < 5:
+                        was_kicked = True
+                        kicked_by = entry.user
+                        kick_reason = entry.reason or "No reason provided"
+                        break
+        except:
+            pass
+        
+        if was_kicked:
+            embed = discord.Embed(
+                title="👢 Member Kicked",
+                color=0xe67e22,
+                timestamp=datetime.utcnow()
+            )
+            embed.add_field(name="User", value=f"{member.mention} ({member})", inline=False)
+            embed.add_field(name="Kicked By", value=str(kicked_by), inline=True)
+            embed.add_field(name="Reason", value=kick_reason, inline=False)
+        else:
+            embed = discord.Embed(
+                title="👋 Member Left",
+                color=0x95a5a6,
+                timestamp=datetime.utcnow()
+            )
+            embed.add_field(name="User", value=f"{member.mention} ({member})", inline=False)
+            embed.add_field(name="Joined At", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S UTC") if member.joined_at else "Unknown", inline=True)
+        
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_footer(text=f"User ID: {member.id}")
+        
+        await burp_bot.send_log(embed)
+    except Exception as e:
+        logger.error(f"Error logging member remove: {e}")
+
+@bot.event
+async def on_member_join(member):
+    """Welcome new members and log joins"""
+    try:
+        # Send welcome message
+        channel = bot.get_channel(WELCOME_CHANNEL)
+        if channel:
+            embed = discord.Embed(
+                title="Welcome!",
+                description=f"Hey mmhmmphff {member.mention}!",
+                color=0x00ff00
+            )
+            embed.set_image(url=member.display_avatar.url)
+            await channel.send(embed=embed)
+            logger.info(f"Sent welcome message for {member.name}")
+        
+        # Log to logs channel
+        embed = discord.Embed(
+            title="📥 Member Joined",
+            color=0x2ecc71,
+            timestamp=datetime.utcnow()
+        )
+        embed.add_field(name="User", value=f"{member.mention} ({member})", inline=False)
+        embed.add_field(name="Account Created", value=member.created_at.strftime("%Y-%m-%d %H:%M:%S UTC"), inline=True)
+        
+        # Calculate account age
+        account_age = datetime.utcnow() - member.created_at
+        embed.add_field(name="Account Age", value=f"{account_age.days} days", inline=True)
+        
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_footer(text=f"User ID: {member.id}")
+        
+        await burp_bot.send_log(embed)
+        
+    except Exception as e:
+        logger.error(f"Error in member join: {e}")
+
+@bot.event
 async def on_message(message):
     """Handle auto-moderation and other messages"""
     if message.author.bot:
         return
     
+    # Skip moderation for the designated admin user
+    if message.author.id == ADMIN_USER_ID:
+        await bot.process_commands(message)
+        return
+    
+    # Check for spam (if enabled)
+    if spam_detection_enabled:
+        is_spam, spam_type = burp_bot.check_spam(message.author.id, message.content)
+        if is_spam:
+            await burp_bot.handle_spam(message, spam_type)
+            return  # Don't process further if message was spam
+    
     # Check for Discord invite links (auto-moderation)
     if auto_mod_enabled and burp_bot.contains_discord_invite(message.content):
-        # Skip moderation for the designated admin user
-        if message.author.id != ADMIN_USER_ID:
-            await burp_bot.handle_discord_invite(message)
-            return  # Don't process further if message was moderated
-    
-    # Verification is now handled by button interactions
+        await burp_bot.handle_discord_invite(message)
+        return  # Don't process further if message was moderated
     
     # Process other commands
     await bot.process_commands(message)
@@ -2037,43 +2366,7 @@ async def send_verification_embed():
     except Exception as e:
         logger.error(f"Error sending verification embed: {e}")
 
-# API endpoints for external integration
-@bot.command(name='announce_winner', hidden=True)
-@is_admin_user()
-async def announce_winner_command(ctx, *, winner_info):
-    """Admin command to announce winner (for testing)"""
-    try:
-        # Parse winner info (you can customize this format)
-        parts = winner_info.split('|')
-        winner_data = {
-            'winner_address': parts[0] if len(parts) > 0 else 'Test Winner',
-            'prize_amount': parts[1] if len(parts) > 1 else '100',
-            'streak_length': parts[2] if len(parts) > 2 else '5',
-            'game_id': parts[3] if len(parts) > 3 else 'test-game-123'
-        }
-        
-        await burp_bot.send_winner_announcement(winner_data)
-        await ctx.send("✅ Winner announcement sent!")
-        
-    except Exception as e:
-        await ctx.send(f"❌ Error: {e}")
-
-@bot.command(name='announce_pool', hidden=True)
-@is_admin_user()
-async def announce_pool_command(ctx, *, pool_info):
-    """Admin command to announce new prize pool (for testing)"""
-    try:
-        parts = pool_info.split('|')
-        pool_data = {
-            'total_prize': parts[0] if len(parts) > 0 else '500',
-            'game_id': parts[1] if len(parts) > 1 else 'new-game-456'
-        }
-        
-        await burp_bot.send_new_prize_pool_announcement(pool_data)
-        await ctx.send("✅ Prize pool announcement sent!")
-        
-    except Exception as e:
-        await ctx.send(f"❌ Error: {e}")
+# API endpoints for external integration removed - use webhooks instead
 
 @bot.tree.command(name='automod', description='Control auto-moderation (Admin only)')
 async def automod_command(interaction: discord.Interaction, action: str = None):
@@ -2135,158 +2428,65 @@ async def automod_command(interaction: discord.Interaction, action: str = None):
     else:
         await interaction.response.send_message("❌ Invalid option. Use `on`, `off`, or `status`", ephemeral=True)
 
-@bot.command(name='testinvite', hidden=True)
-@is_admin_user()
-async def test_invite_command(ctx):
-    """Admin command to test invite link detection"""
-    test_messages = [
-        "Check out this server: discord.gg/test123",
-        "Join us at https://discord.com/invite/abc123",
-        "Come to our Discord: discordapp.com/invite/xyz789",
-        "Visit dsc.gg/shortlink",
-        "This is a normal message without invites"
-    ]
+@bot.tree.command(name='spam', description='Control spam detection (Admin only)')
+async def spam_command(interaction: discord.Interaction, action: str = None):
+    """Admin command to control spam detection"""
+    # Check if user is admin
+    if interaction.user.id != ADMIN_USER_ID:
+        await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+        return
     
-    embed = discord.Embed(
-        title="🧪 Invite Detection Test",
-        description="Testing Discord invite link detection patterns:",
-        color=0x0099ff
-    )
+    global spam_detection_enabled
     
-    for i, test_msg in enumerate(test_messages, 1):
-        detected = burp_bot.contains_discord_invite(test_msg)
-        status = "🚫 Would be deleted" if detected else "✅ Would be allowed"
+    if action is None:
+        # Show current status
+        status = "🟢 Enabled" if spam_detection_enabled else "🔴 Disabled"
+        embed = discord.Embed(
+            title="🚨 Spam Detection Status",
+            description=f"Spam detection is currently **{status}**",
+            color=0x00ff00 if spam_detection_enabled else 0xff0000
+        )
+        
         embed.add_field(
-            name=f"Test {i}",
-            value=f"```{test_msg}```\n{status}",
+            name="📋 Commands",
+            value="• `/spam on` - Enable spam detection\n• `/spam off` - Disable spam detection\n• `/spam status` - Check current status",
             inline=False
         )
-    
-    await ctx.send(embed=embed)
-
-@bot.command(name='dbschema', hidden=True)
-@is_admin_user()
-async def db_schema_command(ctx):
-    """Admin command to check database schema"""
-    try:
-        if not burp_bot.db_pool:
-            await ctx.send("❌ Database not connected")
-            return
         
-        loading_msg = await ctx.send("🔍 Checking database schema...")
+        embed.add_field(
+            name="🔍 What it detects",
+            value=f"• **Rapid Messages**: {SPAM_MESSAGE_THRESHOLD} messages in {SPAM_TIME_WINDOW} seconds\n• **Duplicate Messages**: Same message repeated {SPAM_DUPLICATE_THRESHOLD} times",
+            inline=False
+        )
         
-        async with burp_bot.db_pool.acquire() as conn:
-            # Get all tables
-            tables = await conn.fetch(
-                """SELECT table_name 
-                   FROM information_schema.tables 
-                   WHERE table_schema = 'public' 
-                   ORDER BY table_name"""
-            )
-            
-            if not tables:
-                await loading_msg.edit(content="ℹ️ No tables found in database")
-                return
-            
-            embed = discord.Embed(
-                title="Database Schema",
-                description="Available tables in your database:",
-                color=0x0099ff
-            )
-            
-            table_list = []
-            for table in tables:
-                table_name = table['table_name']
-                table_list.append(f"• {table_name}")
-                
-                # Get column info for each table
-                columns = await conn.fetch(
-                    """SELECT column_name, data_type 
-                       FROM information_schema.columns 
-                       WHERE table_name = $1 
-                       ORDER BY ordinal_position""",
-                    table_name
-                )
-                
-                column_info = []
-                for col in columns[:5]:  # Show first 5 columns
-                    column_info.append(f"{col['column_name']} ({col['data_type']})")
-                
-                if len(columns) > 5:
-                    column_info.append(f"... and {len(columns) - 5} more")
-                
-                embed.add_field(
-                    name=f"Table: {table_name}",
-                    value="```" + "\n".join(column_info) + "```",
-                    inline=False
-                )
-            
-            await loading_msg.edit(content=None, embed=embed)
-            
-    except Exception as e:
-        await ctx.send(f"❌ Error checking schema: {e}")
-        logger.error(f"Error in db_schema_command: {e}")
-
-@bot.command(name='checkwinners', hidden=True)
-@is_admin_user()
-async def check_winners_command(ctx):
-    """Admin command to manually check for new winners"""
-    try:
-        if not burp_bot.db_pool:
-            await ctx.send("❌ Database not connected")
-            return
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         
-        loading_msg = await ctx.send("🔍 Checking database for new winners...")
+    elif action.lower() in ['on', 'enable', 'true']:
+        spam_detection_enabled = True
+        embed = discord.Embed(
+            title="✅ Spam Detection Enabled",
+            description="Spam detection is now **enabled**",
+            color=0x00ff00
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        logger.info(f"Spam detection enabled by {interaction.user.name}")
         
-        async with burp_bot.db_pool.acquire() as conn:
-            # First, let's see what tables exist
-            tables = await conn.fetch(
-                """SELECT table_name 
-                   FROM information_schema.tables 
-                   WHERE table_schema = 'public' 
-                   AND table_name LIKE '%game%' OR table_name LIKE '%winner%' OR table_name LIKE '%streak%'
-                   ORDER BY table_name"""
-            )
-            
-            if not tables:
-                await loading_msg.edit(content="❌ No game-related tables found. Use `!dbschema` to see all tables.")
-                return
-            
-            embed = discord.Embed(
-                title="Database Tables Found",
-                description="Game-related tables in your database:",
-                color=0x00ff00
-            )
-            
-            for table in tables:
-                table_name = table['table_name']
-                
-                # Try to get some sample data
-                try:
-                    sample_data = await conn.fetch(f"SELECT * FROM {table_name} LIMIT 3")
-                    embed.add_field(
-                        name=f"Table: {table_name}",
-                        value=f"Rows found: {len(sample_data)}",
-                        inline=True
-                    )
-                except Exception as e:
-                    embed.add_field(
-                        name=f"Table: {table_name}",
-                        value=f"Error: {str(e)[:50]}...",
-                        inline=True
-                    )
-            
-            embed.add_field(
-                name="Next Steps",
-                value="Use `!dbschema` to see full database structure",
-                inline=False
-            )
-            
-            await loading_msg.edit(content=None, embed=embed)
-            
-    except Exception as e:
-        await ctx.send(f"❌ Error checking winners: {e}")
-        logger.error(f"Error in check_winners_command: {e}")
+    elif action.lower() in ['off', 'disable', 'false']:
+        spam_detection_enabled = False
+        embed = discord.Embed(
+            title="🔴 Spam Detection Disabled",
+            description="Spam detection is now **disabled**",
+            color=0xff0000
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        logger.info(f"Spam detection disabled by {interaction.user.name}")
+        
+    elif action.lower() in ['status', 'check']:
+        status = "🟢 Enabled" if spam_detection_enabled else "🔴 Disabled"
+        await interaction.response.send_message(f"Spam detection is currently **{status}**", ephemeral=True)
+        
+    else:
+        await interaction.response.send_message("❌ Invalid option. Use `on`, `off`, or `status`", ephemeral=True)
 
 # HTTP webhook endpoints (for integration with your gas streaks app)
 from flask import Flask, request, jsonify
