@@ -34,6 +34,9 @@ VERIFICATION_CHANNEL = 1419189311139614841
 WELCOME_CHANNEL = 1419154118085181523
 LINKS_CHANNEL = 1419154016448938004
 
+# Winner notification settings
+MIN_BURP_NOTIFICATION_THRESHOLD = 100000  # Minimum BURP amount to trigger winner notification
+
 # Role configuration
 BURPER_ROLE_NAME = "Burper"
 
@@ -76,8 +79,10 @@ class BurpBot:
         self.db_pool = None
         self.last_checked_winner_id = None
         self.last_checked_game_id = None
+        self.last_checked_slots_winner_id = None  # For Gas Mixer winners
         self.monitoring_task = None
         self.pool_monitoring_task = None
+        self.slots_monitoring_task = None  # For Gas Mixer monitoring
     
     async def init_database(self):
         """Initialize database connection pool"""
@@ -111,13 +116,15 @@ class BurpBot:
             logger.warning("Cannot start monitoring - database not connected")
             return
         
-        # Initialize the last checked winner ID
+        # Initialize the last checked winner IDs
         await self.init_last_winner_id()
+        await self.init_last_slots_winner_id()
         
         # Start the monitoring tasks
         self.monitoring_task = asyncio.create_task(self.monitor_winners())
         self.pool_monitoring_task = asyncio.create_task(self.monitor_new_pool_types())
-        logger.info("Started database monitoring for new winners and new pool types")
+        self.slots_monitoring_task = asyncio.create_task(self.monitor_slots_winners())
+        logger.info("Started database monitoring for new winners, new pool types, and Gas Mixer winners")
     
     async def init_last_winner_id(self):
         """Initialize the last checked winner ID to avoid duplicate notifications"""
@@ -135,6 +142,23 @@ class BurpBot:
                     logger.info(f"Initialized monitoring from winner ID: {self.last_checked_winner_id}")
         except Exception as e:
             logger.error(f"Error initializing last winner ID: {e}")
+    
+    async def init_last_slots_winner_id(self):
+        """Initialize the last checked Gas Mixer winner ID to avoid duplicate notifications"""
+        try:
+            async with self.db_pool.acquire() as conn:
+                # Get the most recent Gas Mixer winner (spin with payout > 0)
+                result = await conn.fetchrow(
+                    """SELECT id FROM burp_slots_spins 
+                       WHERE payout > 0 
+                       ORDER BY created_at DESC 
+                       LIMIT 1"""
+                )
+                if result:
+                    self.last_checked_slots_winner_id = result['id']
+                    logger.info(f"Initialized Gas Mixer monitoring from winner ID: {self.last_checked_slots_winner_id}")
+        except Exception as e:
+            logger.error(f"Error initializing last Gas Mixer winner ID: {e}")
     
     async def monitor_winners(self):
         """Background task to monitor for new winners"""
@@ -191,6 +215,12 @@ class BurpBot:
             token_symbol = pool_info['prize_token_symbol'] if pool_info else 'TOKENS'
             pool_name = pool_info['pool_name'] if pool_info else 'Unknown Pool'
             
+            # Check if prize amount meets minimum threshold for BURP tokens
+            prize_amount = float(winner_row['prize_amount'])
+            if token_symbol == 'BURP' and prize_amount < MIN_BURP_NOTIFICATION_THRESHOLD:
+                logger.info(f"Skipping notification for {winner_row['wallet_address']}: {prize_amount} BURP is below threshold of {MIN_BURP_NOTIFICATION_THRESHOLD}")
+                return
+            
             # Convert database row to winner data format
             winner_data = {
                 'winner_address': winner_row['wallet_address'],
@@ -209,6 +239,77 @@ class BurpBot:
             
         except Exception as e:
             logger.error(f"Error processing new winner: {e}")
+    
+    async def monitor_slots_winners(self):
+        """Background task to monitor for new Gas Mixer winners"""
+        while True:
+            try:
+                if not self.db_pool:
+                    await asyncio.sleep(60)  # Wait 1 minute if no database
+                    continue
+                
+                async with self.db_pool.acquire() as conn:
+                    # Check for new winners since last check
+                    if self.last_checked_slots_winner_id:
+                        query = """
+                            SELECT id, wallet_address, payout, bet_amount, created_at, transaction_hash
+                            FROM burp_slots_spins 
+                            WHERE payout > 0 
+                            AND id > $1
+                            ORDER BY created_at ASC
+                        """
+                        new_winners = await conn.fetch(query, self.last_checked_slots_winner_id)
+                    else:
+                        # First time check - get the most recent winner
+                        query = """
+                            SELECT id, wallet_address, payout, bet_amount, created_at, transaction_hash
+                            FROM burp_slots_spins 
+                            WHERE payout > 0 
+                            ORDER BY created_at DESC 
+                            LIMIT 1
+                        """
+                        new_winners = await conn.fetch(query)
+                    
+                    # Process new winners
+                    for winner in new_winners:
+                        await self.process_slots_winner(winner)
+                        self.last_checked_slots_winner_id = winner['id']
+                
+                # Check every 30 seconds for new winners
+                await asyncio.sleep(30)
+                
+            except Exception as e:
+                logger.error(f"Error in Gas Mixer winner monitoring: {e}")
+                await asyncio.sleep(60)  # Wait longer on error
+    
+    async def process_slots_winner(self, winner_row):
+        """Process a new Gas Mixer winner and send notification"""
+        try:
+            payout = float(winner_row['payout'])
+            
+            # Check if payout meets minimum threshold for BURP
+            if payout < MIN_BURP_NOTIFICATION_THRESHOLD:
+                logger.info(f"Skipping Gas Mixer notification for {winner_row['wallet_address']}: {payout} BURP is below threshold of {MIN_BURP_NOTIFICATION_THRESHOLD}")
+                return
+            
+            # Convert database row to winner data format
+            winner_data = {
+                'winner_address': winner_row['wallet_address'],
+                'prize_amount': str(winner_row['payout']),
+                'bet_amount': str(winner_row['bet_amount']),
+                'game_id': winner_row['transaction_hash'][:16] if winner_row['transaction_hash'] else f"spin-{winner_row['id']}",
+                'token_symbol': 'BURP',
+                'pool_name': 'Gas Mixer',
+                'game_type': 'slots'
+            }
+            
+            logger.info(f"New Gas Mixer winner detected: {winner_data['winner_address']} won {winner_data['prize_amount']} BURP")
+            
+            # Send winner announcement
+            await self.send_slots_winner_announcement(winner_data)
+            
+        except Exception as e:
+            logger.error(f"Error processing Gas Mixer winner: {e}")
     
     async def check_for_new_pool_types(self):
         """Monitor for newly created pool types (not prize pool resets)"""
@@ -670,6 +771,81 @@ class BurpBot:
             
         except Exception as e:
             logger.error(f"Error sending winner announcement: {e}")
+    
+    async def send_slots_winner_announcement(self, winner_data):
+        """Send Gas Mixer winner announcement to burp-winners channel"""
+        try:
+            channel = self.bot.get_channel(BURP_WINNERS_CHANNEL)
+            if not channel:
+                logger.error(f"Could not find burp-winners channel {BURP_WINNERS_CHANNEL}")
+                return
+            
+            # Get token symbol and pool info
+            token_symbol = winner_data.get('token_symbol', 'BURP')
+            pool_name = winner_data.get('pool_name', 'Gas Mixer')
+            
+            embed = discord.Embed(
+                title=f"🧪 {pool_name.upper()} WINNER!",
+                description=f"Congratulations to our latest {token_symbol} winner!",
+                color=0xED4245  # Red color for Gas Mixer
+            )
+            
+            # Get winner address and create pool.pm link
+            winner_address = winner_data.get('winner_address', 'Unknown')
+            if len(winner_address) > 20:
+                # Truncate address: first 8 + ... + last 8 characters
+                truncated_address = f"{winner_address[:8]}...{winner_address[-8:]}"
+            else:
+                truncated_address = winner_address
+            
+            # Create pool.pm link
+            pool_pm_link = f"https://pool.pm/{winner_address}"
+            
+            # Add winner information
+            embed.add_field(
+                name="Winner",
+                value=f"[{truncated_address}]({pool_pm_link})",
+                inline=False
+            )
+            
+            # Format prize amount as whole number
+            try:
+                prize_amount = float(winner_data.get('prize_amount', '0'))
+                prize_formatted = f"{int(prize_amount):,}"
+            except:
+                prize_formatted = winner_data.get('prize_amount', 'N/A')
+            
+            embed.add_field(
+                name="Prize Won",
+                value=f"```{prize_formatted} {token_symbol}```",
+                inline=True
+            )
+            
+            # Format bet amount
+            try:
+                bet_amount = float(winner_data.get('bet_amount', '0'))
+                bet_formatted = f"{int(bet_amount):,}"
+            except:
+                bet_formatted = winner_data.get('bet_amount', 'N/A')
+            
+            embed.add_field(
+                name="Bet Amount",
+                value=f"```{bet_formatted} {token_symbol}```",
+                inline=True
+            )
+            
+            # Add game information
+            embed.add_field(
+                name="Game",
+                value=f"```{pool_name}```",
+                inline=True
+            )
+            
+            await channel.send(embed=embed)
+            logger.info(f"Sent Gas Mixer winner announcement for {winner_address}")
+            
+        except Exception as e:
+            logger.error(f"Error sending Gas Mixer winner announcement: {e}")
     
     async def send_new_pool_type_announcement(self, pool_data):
         """Send new prize pool announcement"""
