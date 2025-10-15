@@ -752,7 +752,6 @@ class BurpBot:
             embed.add_field(name="Channel", value=message.channel.mention, inline=True)
             embed.add_field(name="Type", value=spam_type.replace("_", " ").title(), inline=True)
             embed.add_field(name="Message", value=message.content[:1024] if message.content else "*No content*", inline=False)
-            embed.set_footer(text=f"User ID: {message.author.id}")
             
             await self.send_log(embed)
             
@@ -1814,7 +1813,6 @@ async def on_message_delete(message):
             attachments_info = "\n".join([f"[{att.filename}]({att.url})" for att in message.attachments])
             embed.add_field(name="Attachments", value=attachments_info[:1024], inline=False)
         
-        embed.set_footer(text=f"User ID: {message.author.id} | Message ID: {message.id}")
         
         await burp_bot.send_log(embed)
     except Exception as e:
@@ -1844,7 +1842,6 @@ async def on_message_edit(before, after):
         if after.content:
             embed.add_field(name="After", value=after.content[:1024], inline=False)
         
-        embed.set_footer(text=f"User ID: {before.author.id} | Message ID: {before.id}")
         
         await burp_bot.send_log(embed)
     except Exception as e:
@@ -1865,7 +1862,6 @@ async def on_member_update(before, after):
             embed.add_field(name="Before", value=before.nick or "*None*", inline=True)
             embed.add_field(name="After", value=after.nick or "*None*", inline=True)
             embed.set_thumbnail(url=after.display_avatar.url)
-            embed.set_footer(text=f"User ID: {after.id}")
             
             await burp_bot.send_log(embed)
         
@@ -1889,7 +1885,6 @@ async def on_member_update(before, after):
                     embed.add_field(name="Removed Roles", value=", ".join([role.mention for role in removed_roles]), inline=False)
                 
                 embed.set_thumbnail(url=after.display_avatar.url)
-                embed.set_footer(text=f"User ID: {after.id}")
                 
                 await burp_bot.send_log(embed)
     except Exception as e:
@@ -1921,7 +1916,6 @@ async def on_member_ban(guild, user):
         embed.add_field(name="Banned By", value=str(banned_by), inline=True)
         embed.add_field(name="Reason", value=ban_reason, inline=False)
         embed.set_thumbnail(url=user.display_avatar.url)
-        embed.set_footer(text=f"User ID: {user.id}")
         
         await burp_bot.send_log(embed)
     except Exception as e:
@@ -1950,7 +1944,6 @@ async def on_member_unban(guild, user):
         embed.add_field(name="User", value=f"{user.mention} ({user})", inline=False)
         embed.add_field(name="Unbanned By", value=str(unbanned_by), inline=True)
         embed.set_thumbnail(url=user.display_avatar.url)
-        embed.set_footer(text=f"User ID: {user.id}")
         
         await burp_bot.send_log(embed)
     except Exception as e:
@@ -1996,7 +1989,6 @@ async def on_member_remove(member):
             embed.add_field(name="Joined At", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S UTC") if member.joined_at else "Unknown", inline=True)
         
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.set_footer(text=f"User ID: {member.id}")
         
         await burp_bot.send_log(embed)
     except Exception as e:
@@ -2032,7 +2024,6 @@ async def on_member_join(member):
         embed.add_field(name="Account Age", value=f"{account_age.days} days", inline=True)
         
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.set_footer(text=f"User ID: {member.id}")
         
         await burp_bot.send_log(embed)
         
